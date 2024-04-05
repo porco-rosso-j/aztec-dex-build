@@ -11,6 +11,22 @@ impl Token {
         Self { address }
     }
 
+    pub fn shield(
+        self: Self,
+        context: &mut PrivateContext,
+        from: AztecAddress,
+        amount: Field,
+        secret_hash: Field,
+        nonce: Field
+    ) {
+        let _ = context.call_public_function(
+            self.address,
+            FunctionSelector::from_signature("shield((Field),Field,Field,Field)"),
+            [from.to_field(), amount, secret_hash, nonce]
+        );
+    }
+
+
     pub fn transfer_public(
         self: Self,
         context: &mut PublicContext,
@@ -40,38 +56,76 @@ impl Token {
             [from.to_field(), to.to_field(), amount, nonce]
         );
     }
+
+    pub fn transfer(
+        self: Self,
+        context: &mut PrivateContext,
+        from: AztecAddress,
+        to: AztecAddress,
+        amount: Field,
+        nonce: Field
+    ) {
+        let _ret = context.call_private_function(
+            self.address,
+            FunctionSelector::from_signature("transfer((Field),(Field),Field,Field)"),
+            [from.to_field(), to.to_field(), amount, nonce]
+        );
+    }
+
+    pub fn balance_of_public(
+        self: Self,
+        context: &mut PublicContext,
+        owner: AztecAddress
+    ) -> Field {
+        let _ret = context.call_public_function(
+            self.address,
+            FunctionSelector::from_signature("balance_of_public((Field))"),
+            [owner.to_field()]
+        );
+        _ret[0]
+    }
 }
 
-struct TokenBridge {
+struct Uniswap {
   address: AztecAddress,
 }
 
-impl TokenBridge {
+impl Uniswap {
     pub fn at(address: AztecAddress) -> Self {
         Self { address }
     }
 
-    pub fn token(self: Self, context: &mut PublicContext) -> AztecAddress {
-        let return_values = context.call_public_function(
-            self.address,
-            FunctionSelector::from_signature("get_token()"),
-            []
-        );
-        AztecAddress::from_field(return_values[0])
-    }
-
-    pub fn exit_to_l1_public(
+    pub fn swap_public(
         self: Self,
-        context: &mut PublicContext,
-        recipient: EthAddress,
-        amount: Field,
-        caller_on_l1: EthAddress,
-        nonce: Field
+         context: &mut PublicContext,
+        sender: AztecAddress,
+        input_asset_bridge: AztecAddress,
+        input_amount: Field,
+        output_asset_bridge: AztecAddress,
+        nonce_for_transfer_approval: Field,
+        uniswap_fee_tier: Field,
+        minimum_output_amount: Field,
+        recipient: AztecAddress,
+        secret_hash_for_L1_to_l2_message: Field,
+        caller_on_L1: EthAddress,
+        nonce_for_swap_approval: Field
     ) {
         let _ = context.call_public_function(
             self.address,
-            FunctionSelector::from_signature("exit_to_l1_public((Field),Field,(Field),Field)"),
-            [recipient.to_field(), amount, caller_on_l1.to_field(), nonce]
+            FunctionSelector::from_signature("swap_public((Field),(Field),Field,(Field),Field,Field,Field,(Field),Field,(Field),Field)"),
+            [
+                sender.to_field(), 
+                input_asset_bridge.to_field(), 
+                input_amount, 
+                output_asset_bridge.to_field(), 
+                nonce_for_transfer_approval,
+                uniswap_fee_tier,
+                minimum_output_amount,
+                recipient.to_field(),
+                secret_hash_for_L1_to_l2_message,
+                caller_on_L1.to_field(),
+                nonce_for_swap_approval
+            ]
         );
     }
 }

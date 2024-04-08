@@ -3,10 +3,17 @@ mod interfaces;
 mod array;
 
 // What this contract does
-// - let users register dca storategy
-// - let users deposit DAI for a given strategy to dca ETH
-// - let users claim dca-ed ETH
+// - users can privately register dca strategy
+// - users can privately deposit token_out, say DAI, for a given strategy to dca token_in, say ETH
+// - users can privately claim dca-ed ETH
 // - a dca strategy per address
+
+// *** what's public and private ? *** 
+// 1: user address: private
+// 2: input amount: public but can be more private by splitting
+// 3: output amount: private
+// greater than the original dca-bridge blueprint with only output amount being private
+// https://docs.google.com/document/d/1OWLA41AIiwszgL5eQn4vyTKvFtKHJlBZBdveUpgtOeA/view
 
 contract DCAVault {
     // use dep::aztec::prelude::{FunctionSelector, AztecAddress, Map, PublicImmutable, PublicMutable, PublicImmutable, PrivateMutable};
@@ -104,94 +111,90 @@ contract DCAVault {
         storage.epoch_to_total_token_in.at(epoch).write(U128::from_field(new_balance));
     }
 
+    // This method handles token deposit from users
+    // and records the amount and duration in DCA Note.
+    // if `init` is true: initialize dca note 
+    // if `init` is false: add dca_amount to the existing dca position.
     #[aztec(private)]
-    fn register_dca(
-        sell_amount: U128, 
-        initial_deposit_amount: U128, 
+    fn add_dca_amount(
+        dca_amount: U128, 
+        total_deposit_amount:U128, // dca_amount * (end_epoch - start_epoch)
         start_epoch: U128, 
         end_epoch: U128,
-        nonce_for_unshield_approval:Field
+        nonce_for_unshield_approval:Field,
+        init: bool // true if dca_note for an acc has never been created
     ) {
 
-        context.call_public_function(
-            context.this_address(),
-            FunctionSelector::from_signature("_validate_epoch((Field),(Field))"),
-            [U128::to_field(start_epoch), U128::to_field(end_epoch)]
-        );
+        let sender = context.msg_sender();
+        let mut dca_note = DCANote::empty();
 
-        let total_sell_amount = sell_amount * (end_epoch - start_epoch);
-        assert(initial_deposit_amount == total_sell_amount, "initial_deposit_amount isn't equal to total_sell_amount");
+        // init
+        if (init) {
+            assert((end_epoch - start_epoch) > U128::from_field(0), "invalid epochs");
+            
+            context.call_public_function(
+               context.this_address(),
+               FunctionSelector::from_signature("_validate_epoch((Field),(Field))"),
+               [U128::to_field(start_epoch), U128::to_field(end_epoch)]
+            );
 
-        // create a new dca note
-        // if there is already an active note, it triggers claim and re-set. 
-        let mut dca_note = DCANote::new(sell_amount, initial_deposit_amount, start_epoch, end_epoch, context.msg_sender());
-        storage.dca_notes.at(context.msg_sender()).initialize(
-            &mut dca_note,
-            true
-        );
-        
-        let asset = storage.token_out.read_private();
-        Token::at(asset).unshield(
-            &mut context,
-            context.msg_sender(),
-            context.this_address(),
-            U128::to_field(initial_deposit_amount),
-            nonce_for_unshield_approval
-        );
+            let total_dca_amount = dca_amount * (end_epoch - start_epoch);
+            assert(total_deposit_amount == total_dca_amount, "total_deposit_amount isn't equal to total_dca_amount");
 
-        context.call_public_function(
-            context.this_address(),
-            FunctionSelector::from_signature("_add_token_out_amount(Field,Field,Field)"),
-             [U128::to_field(sell_amount), U128::to_field(start_epoch), U128::to_field(end_epoch)]
-        );
-    }
+            dca_note = DCANote::new(dca_amount, total_deposit_amount, start_epoch, end_epoch, sender);
+            storage.dca_notes.at(sender).initialize(
+               &mut dca_note,
+               true
+            );
 
-    // add sell-token balance on a specifc dca note
-    #[aztec(private)]
-    fn add_balance(amount: U128, total_deposit_amount:U128, nonce_for_unshield_approval:Field) {
+        // add
+        } else {
 
-        let dca_note = storage.dca_notes.at(context.msg_sender()).get_note(false);
-        let new_sell_amount: U128 = dca_note.sell_amount + amount;
-        let new_total_deposit_amount: U128 = new_sell_amount * (dca_note.end_epoch - dca_note.start_epoch);
-        assert(new_total_deposit_amount == (dca_note.total_deoposit_amount + total_deposit_amount), "invalid total_deposit_amount");
+           let _dca_note = storage.dca_notes.at(sender).get_note(false);
+           let new_dca_amount: U128 = _dca_note.dca_amount + dca_amount;
+           let new_total_deposit_amount: U128 = new_dca_amount * (_dca_note.end_epoch - _dca_note.start_epoch);
+           assert(new_total_deposit_amount == (_dca_note.total_deoposit_amount + total_deposit_amount), "invalid total_deposit_amount");
 
-        let mut new_dca_note = DCANote::new(
-            new_sell_amount, 
-            new_total_deposit_amount,
-            dca_note.start_epoch,
-            dca_note.end_epoch,
-            context.msg_sender()
-        );
+           // here i may add logics for changes in epoch, tho, complexity...
 
-        storage.dca_notes.at(context.msg_sender()).replace(&mut new_dca_note, true);
+           dca_note = DCANote::new(
+               new_dca_amount, 
+               new_total_deposit_amount,
+               _dca_note.start_epoch,
+               _dca_note.end_epoch,
+               sender
+           );
+
+           storage.dca_notes.at(sender).replace(&mut dca_note, true);
+        }
 
         let asset = storage.token_out.read_private();
         Token::at(asset).unshield(
             &mut context,
-            context.msg_sender(),
+            sender,
             context.this_address(),
-            U128::to_field(total_deposit_amount),
+            total_deposit_amount.to_field(),
             nonce_for_unshield_approval
         );
 
         context.call_public_function(
             context.this_address(),
             FunctionSelector::from_signature("_add_token_out_amount((Field),(Field),(Field))"),
-            [amount.to_field(), dca_note.start_epoch.to_field(), dca_note.end_epoch.to_field()]
+            [dca_amount.to_field(), dca_note.start_epoch.to_field(), dca_note.end_epoch.to_field()]
         );
         
     }
 
     #[aztec(private)]
-    fn remove_balance(amount:U128, total_withdraw_amount:U128, secret_hash:Field) {
+    fn remove_dca_amount(amount:U128, total_withdraw_amount:U128, secret_hash:Field) {
         
         let dca_note = storage.dca_notes.at(context.msg_sender()).get_note(false);
-        let new_sell_amount: U128 = dca_note.sell_amount - amount;
-        let new_total_deposit_amount = new_sell_amount * (dca_note.end_epoch - dca_note.start_epoch);
+        let new_dca_amount: U128 = dca_note.dca_amount - amount;
+        let new_total_deposit_amount = new_dca_amount * (dca_note.end_epoch - dca_note.start_epoch);
         assert(new_total_deposit_amount == (dca_note.total_deoposit_amount - total_withdraw_amount), "invalid total_withdraw_amount");
 
         let mut new_dca_note = DCANote::new(
-            new_sell_amount, 
+            new_dca_amount, 
             new_total_deposit_amount,
             dca_note.start_epoch,
             dca_note.end_epoch,
@@ -269,9 +272,29 @@ contract DCAVault {
         // -> make the func essentially callable by anyone!
     }
 
+    // here probably there is need to implement create public auth wit
+    // so that uniswap contract can receive(transfer) token from this cotnract.
+    #[aztec(public)] 
+    fn spend_public_authwit(inner_hash: Field) -> Field {
+        // let message_hash = compute_outer_authwit_hash(
+        //     context.msg_sender(),
+        //     context.chain_id(),
+        //     context.version(),
+        //     inner_hash
+        // );
+        // let value = storage.approved_action.at(message_hash).read();
+        // if (value) {
+        //     context.push_new_nullifier(message_hash, 0);
+        //     IS_VALID_SELECTOR
+        // } else {
+        //     0
+        // }
+        0
+    }
+
     // from user
     #[aztec(private)]
-    fn claim_token(
+    fn claim_token_in(
         current_epoch: U128, 
         epoch_diff: U128,
         epoch_to_total_token_in: [U128;MAX_EPOCH],
@@ -307,12 +330,14 @@ contract DCAVault {
         for i in 0..len {
             let index = i as Field + U128::to_field(dca_note.start_epoch);
             if (U128::from_field(index) <= dca_note.end_epoch) {  
-               eth_amount = eth_amount + (epoch_to_total_token_in[index] * dca_note.sell_amount / epoch_to_total_token_out[i]);
+               eth_amount = eth_amount + (epoch_to_total_token_in[index] * dca_note.dca_amount / epoch_to_total_token_out[index]);
             }
         }
 
-        // create pending shield instead of transfer...? 
-        // individual users can execute private transfer from this address..?
+        // TODO: dca note should be replaced with a new dsa note with reduced amounts 
+        // suppose partial claim is not possible, epoch nums can also be zeroed.
+
+        // individual users can execute private transfer in this address..?
         let _callStackItem = context.call_private_function(
             storage.token_out.read_private(),
             FunctionSelector::from_signature("transfer((Field),(Field),Field,Field)"),
@@ -333,33 +358,9 @@ contract DCAVault {
     #[aztec(public)] 
     #[aztec(internal)]
     fn _validate_claim_params(
-        _current_epoch: U128, // Field?
+        _current_epoch: U128, 
         _end_epoch: U128,
         _start_epoch: U128,
-        // _token_in_a:Field, 
-        // _token_in_b:Field, 
-        // _token_in_c:Field, 
-        // _token_in_d:Field, 
-        // _token_in_e:Field, 
-        // _token_in_f:Field, 
-        // _token_in_g:Field, 
-        // _token_in_h:Field, 
-        // _token_in_i:Field, 
-        // _token_in_j:Field, 
-        // _token_in_k:Field,
-        // _token_in_l:Field, 
-        // _token_out_a:Field, 
-        // _token_out_b:Field, 
-        // _token_out_c:Field, 
-        // _token_out_d:Field, 
-        // _token_out_e:Field, 
-        // _token_out_f:Field, 
-        // _token_out_g:Field, 
-        // _token_out_h:Field, 
-        // _token_out_i:Field, 
-        // _token_out_j:Field, 
-        // _token_out_k:Field,
-        // _token_out_l:Field, 
         _token_in_a:U128, 
         _token_in_b:U128, 
         _token_in_c:U128, 
@@ -480,51 +481,43 @@ contract DCAVault {
 
 /*
 
+TODO 1: figure out a way for users to manipulate note owned by contract.
+so that users can claim funds sit on contracts privately.
+`crowdfunding` contract somehow lets user withdraw token privately by `transfer` but 
+im not quite sure how this is feasible. the value note created at donating is not used weirdly.
+
+TODO 2: implement splitter contract and making DCA act as a batcher
+
 the reason why hiding sender addr is not enough but amount should be as blur as possible is to
 decrease the chance for observers to tell from which address the fund comes from.
 e.g. if address 0xA shields 100k dai right before a new 100k dai is deposited to this vault, 
 there is a chance that this fund comes from the 0xA address. if user be cautious, he first puts
 30k and subsequently, 50k, 10k, and 10k to reduce the chance. 
-this is why `add_liquidity()` func is useful.
+
+`add_balance` func should be called by splitter, which is initiated by relayer, on users behalf.
 
 ----
 
-so, where can this go about nagating the potential loss due to the lack of total_deoposit_amount against sell_amount * epochs
+TODO 3: epoch management
+currently, when / which funcs relayers and users can do are not restricted but this is disruptive otherwise.
 
-1: in executeBatchSwap()
--> re-calculates total_token_out_amount but how without being able to know each user's DCANote
--> if month == epoch and users need to declare it publicly.. hmm this could leak sell_amount
--> 
+---- 
 
-2: end_epoch so... len can be caluclated like below
--> epoch = current_epoch > end_epoch ? end_epoch : current_epoch;
--> epoch_diff = epoch - start_epoch
+TODO 4: add relayer. by default admin == relayer but they can be separate
 
-this comes with re-initializing note at each claiming and occasionally each reset of dca strategy.
+---- 
 
+TODO 5: claim function for relayers to deposit the token_in back to this contract, 
+        recording the total amount in epoch_to_total_token_in
 
----
-
-current challenge in implmenting claim function
-
-1: unable to fetch epoch_to_token_in and _out, as private funcs can't access to public state
--> pass them as args and verify in pub funcs
-2: hard to pass these arrays to pub func, as `call_public_function` only receives the array of Field 
-   it doesn't technically seem impossible but then, the length of params will reach 27 lol
-   i assume there should be max length of args in the system so it perhaps fails in runtime...
-3:
-
-
-TODO:
-1: partial add.
-2: partial claim. this comes with implementing claimed amts or epoch in note.
-3: add relayer. by default admin == relayer.
-4: figure out if contract is able to spend private balances transferred from users and who can initiate this execution.
-   if private, there might be a way to create a situation where relayer can't know how many balances this vault actually holds
-   even thought its not true with the current model as anyone can calculate the sum of the epoch_to_total_token_out map
-5: private transefr * relayer might not be technically feasible
+Current Limitation
+1: to achive split-deposit, users need to call `add_dca_amount()` multiple times
+   private action * relayer might not be technically feasible
    https://github.com/AztecProtocol/aztec-packages/blob/master/docs/docs/learn/concepts/accounts/authwit.md
    relayer needs to know decryption key to know how many amounts 
-
+2: unsure if private-transfer from contract to account(caller) is possible
+3: a lack of timestamp in L2
+4: no custom slippage for each user ( this contract has minimum slippage visible to users )
+5: no custom dca period ( this value can also be pre-defined on contract )
 
 */

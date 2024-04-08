@@ -10,7 +10,7 @@ global MAX_EPOCH: Field = 12;
 
 #[aztec(note)]
 struct DCANote {
-    sell_amount: U128,
+    dca_amount: U128,
     total_deoposit_amount: U128,
     start_epoch: U128,
     end_epoch: U128,
@@ -19,20 +19,30 @@ struct DCANote {
 
 impl DCANote {
     pub fn new(
-        sell_amount: U128,
+        dca_amount: U128,
         total_deoposit_amount: U128,
         start_epoch: U128,
         end_epoch: U128,
         owner: AztecAddress
     ) -> Self {
         DCANote { 
-            sell_amount, 
+            dca_amount, 
             total_deoposit_amount, 
             start_epoch, 
             end_epoch, 
             owner,
             header: NoteHeader::empty()
         }
+    }
+
+    pub fn empty() -> Self {
+        DCANote::new(
+            U128::from_field(0), 
+            U128::from_field(0),
+            U128::from_field(0),
+            U128::from_field(0),
+            AztecAddress::from_field(0),
+        )
     }
 }
 

@@ -1,0 +1,41 @@
+title UniswapDCA
+
+participant Relayer
+participant Account
+participant DCAContract
+participant UniswapConnect
+participant TokenBridge
+participant TokenPortal
+participant UniswapPortal
+participant Uniswap
+
+
+Account-->DCAContract:provide authwitness to \n let it take token A away
+
+Account->DCAContract:call `registerDCA()` which transfers \ntoken A from account to the contract. \n
+
+note over Account, DCAContract:- total private balance recorded publicly \n- dca-amount for per-user secret identifier is public \n- slippage is the same across all strategies due to batch \n- strategy can be selected ( per week, per month, etc...) \n- deposit amount of a dca strategy can be split
+
+Relayer->DCAContract:periodically call `executeBatchSwap()` \nto bridge all the requested amount of \ntokens for this epoch  
+
+note over Relayer, DCAContract:*reason not token transfer not happning here \nis public authwit reveals user address
+
+DCAContract->UniswapConnect:call `swapPrivate()`
+
+UniswapConnect->TokenBridge:transfer tokens
+
+TokenBridge->TokenPortal:bridge tokens to Uniswap Portal
+
+TokenPortal->UniswapPortal:transfer tokens
+
+UniswapPortal->Uniswap:swap token A for token B
+
+UniswapPortal->TokenPortal:transfer token B
+
+Relayer->
+
+TokenPortal->TokenBridge:bridge token B back
+
+TokenBridge->DCAContract:transfer token B back.
+
+Account->DCAContract: claim token B. puedo-user-id is verified

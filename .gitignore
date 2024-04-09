@@ -1,1 +1,6 @@
 trash
+packages/l1-contracts
+packages/src
+packages/aztec-contracts/stealth_account
+
+.DS_Store

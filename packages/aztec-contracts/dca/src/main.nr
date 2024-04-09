@@ -3,10 +3,10 @@ mod interfaces;
 mod array;
 
 // What this contract does
-// - users can privately register dca strategy
-// - users can privately deposit token_out, say DAI, for a given strategy to dca token_in, say ETH
-// - users can privately claim dca-ed ETH
+// - users can privately register dca strategy, depositing token_out, say DAI, for a given strategy to dca token_in, say ETH
+// - users can privately claim dca-ed token_in, e.g. ETH
 // - a dca strategy per address
+// - relayer carries out cross-chain DCA operation on behalf of users
 
 // *** what's public and private ? *** 
 // 1: user address: private
@@ -16,7 +16,6 @@ mod array;
 // https://docs.google.com/document/d/1OWLA41AIiwszgL5eQn4vyTKvFtKHJlBZBdveUpgtOeA/view
 
 contract DCAVault {
-    // use dep::aztec::prelude::{FunctionSelector, AztecAddress, Map, PublicImmutable, PublicMutable, PublicImmutable, PrivateMutable};
     use dep::aztec::prelude::{
         AztecAddress, EthAddress, FunctionSelector, NoteHeader, NoteGetterOptions, NoteViewerOptions,
         PrivateContext, Map, PublicMutable, PublicImmutable, PrivateMutable, SharedImmutable
@@ -34,7 +33,7 @@ contract DCAVault {
         current_epoch: PublicMutable<U128>,
         epoch_to_total_token_out: Map<Field, PublicMutable<U128>>, // epoch -> dai amount sold every epoch 
         epoch_to_total_token_in: Map<Field, PublicMutable<U128>>, // epoch -> eth amount bought by dca each epoch
-        dca_notes: Map<AztecAddress, PrivateMutable<DCANote>>,
+        dca_notes: Map<AztecAddress, PrivateMutable<DCANote>>, 
         epoch_to_dca_executed: Map<Field, PublicMutable<bool>>, 
     }
 
@@ -128,7 +127,7 @@ contract DCAVault {
         let sender = context.msg_sender();
         let mut dca_note = DCANote::empty();
 
-        // init
+        // add amount for the first time
         if (init) {
             assert((end_epoch - start_epoch) > U128::from_field(0), "invalid epochs");
             
@@ -147,7 +146,7 @@ contract DCAVault {
                true
             );
 
-        // add
+        // increase the deposit amount
         } else {
 
            let _dca_note = storage.dca_notes.at(sender).get_note(false);
@@ -324,20 +323,21 @@ contract DCAVault {
         ); 
 
         // calculate total eth purchased through dollar cost averages within the specified period for a user
-        let mut eth_amount: U128 = U128::from_field(0);
+        let mut total_eth_amount: U128 = U128::from_field(0);
         let len = MAX_EPOCH as u64;
 
         for i in 0..len {
             let index = i as Field + U128::to_field(dca_note.start_epoch);
             if (U128::from_field(index) <= dca_note.end_epoch) {  
-               eth_amount = eth_amount + (epoch_to_total_token_in[index] * dca_note.dca_amount / epoch_to_total_token_out[index]);
+              let eth_amount = (epoch_to_total_token_in[index] * dca_note.dca_amount / epoch_to_total_token_out[index]);
+               total_eth_amount = total_eth_amount + eth_amount;
             }
         }
 
         // TODO: dca note should be replaced with a new dsa note with reduced amounts 
         // suppose partial claim is not possible, epoch nums can also be zeroed.
 
-        // individual users can execute private transfer in this address..?
+        // individual users can execute private transfer from this address to them with no permission..?
         let _callStackItem = context.call_private_function(
             storage.token_out.read_private(),
             FunctionSelector::from_signature("transfer((Field),(Field),Field,Field)"),
@@ -392,9 +392,6 @@ contract DCAVault {
         let epoch_to_total_token_in = array::to_array_from_u128(_token_in_a, _token_in_b, _token_in_c, _token_in_d, _token_in_e, _token_in_f, _token_in_g, _token_in_h, _token_in_i, _token_in_j, _token_in_k, _token_in_l);
         let epoch_to_total_token_out = array::to_array_from_u128(_token_out_a, _token_out_b, _token_out_c, _token_out_d, _token_out_e, _token_out_f, _token_out_g, _token_out_h, _token_out_i, _token_out_j, _token_out_k, _token_out_l);
  
-        // let epoch_to_total_token_in = array::to_u128_from_field(_epoch_to_total_token_in);
-        // let epoch_to_total_token_out = array::to_u128_from_field(_epoch_to_total_token_out);
-
         let mut end_epoch: U128 = U128::from_field(0);
         if (_current_epoch > _end_epoch) {
             end_epoch = _end_epoch;
@@ -461,7 +458,7 @@ contract DCAVault {
         storage.admin.read().to_field()
     }
 
-    unconstrained fn get_uniswap_bridge_address() -> pub Field {
+    unconstrained fn get_uniswap_connect_address() -> pub Field {
         storage.uniswap.read_public().to_field()
     }
 
@@ -476,6 +473,9 @@ contract DCAVault {
     unconstrained fn get_epoch() -> pub U128 {
         storage.current_epoch.read()
     }
+
+    // get epoch_to_total_token_out
+    // get epoch_to_total_token_in
 }
 
 
@@ -509,6 +509,13 @@ TODO 4: add relayer. by default admin == relayer but they can be separate
 
 TODO 5: claim function for relayers to deposit the token_in back to this contract, 
         recording the total amount in epoch_to_total_token_in
+
+---- 
+
+TODO 6: implements phrases and funcs to update them
+
+----
+
 
 Current Limitation
 1: to achive split-deposit, users need to call `add_dca_amount()` multiple times

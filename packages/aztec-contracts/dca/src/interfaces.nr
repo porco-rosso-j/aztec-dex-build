@@ -1,6 +1,6 @@
 // docs:start:interfaces
 use dep::aztec::prelude::{FunctionSelector, AztecAddress, EthAddress, PrivateContext};
-use dep::aztec::context::PublicContext;
+use dep::aztec::context::{PublicContext, gas::GasOpts};
 
 struct Token {
   address: AztecAddress,
@@ -38,7 +38,8 @@ impl Token {
         let _ = context.call_public_function(
             self.address,
             FunctionSelector::from_signature("transfer_public((Field),(Field),Field,Field)"),
-            [from.to_field(), to.to_field(), amount, nonce]
+            [from.to_field(), to.to_field(), amount, nonce],
+            GasOpts::default()
         );
     }
 
@@ -80,7 +81,8 @@ impl Token {
         let _ret = context.call_public_function(
             self.address,
             FunctionSelector::from_signature("balance_of_public((Field))"),
-            [owner.to_field()]
+            [owner.to_field()],
+             GasOpts::default()
         );
         _ret[0]
     }
@@ -125,7 +127,8 @@ impl Uniswap {
                 secret_hash_for_L1_to_l2_message,
                 caller_on_L1.to_field(),
                 nonce_for_swap_approval
-            ]
+            ],
+             GasOpts::default()
         );
     }
 }

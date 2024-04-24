@@ -23,18 +23,19 @@ contract DCAVault {
     use dep::aztec::{note::note_getter_options::Comparator, context::{PublicContext, Context}};
     use crate::interfaces::{Token, Uniswap};
     use crate::dca_note::{DCANote, DCA_NOTE_LEN, MAX_EPOCH};
+    use crate::status::{Status, STATUS_SERIALIZED_LEN};
     use crate::array;
 
+    #[aztec(storage)]
     struct Storage {
-        admin: PublicImmutable<AztecAddress>,
+        admin: PublicImmutable<AztecAddress>, // admin == relayer
         uniswap: SharedImmutable<AztecAddress>,
-        token_out: SharedImmutable<AztecAddress>,
-        token_in: SharedImmutable<AztecAddress>,
-        current_epoch: PublicMutable<U128>,
+        token_out: SharedImmutable<AztecAddress>, // token sold e.g. dai
+        token_in: SharedImmutable<AztecAddress>, // token purchased e.g. eth
         epoch_to_total_token_out: Map<Field, PublicMutable<U128>>, // epoch -> dai amount sold every epoch 
         epoch_to_total_token_in: Map<Field, PublicMutable<U128>>, // epoch -> eth amount bought by dca each epoch
         dca_notes: Map<AztecAddress, PrivateMutable<DCANote>>, 
-        epoch_to_dca_executed: Map<Field, PublicMutable<bool>>, 
+        status: PublicMutable<Status>,
     }
 
     impl Storage {
@@ -44,71 +45,53 @@ contract DCAVault {
             uniswap: SharedImmutable::new(context, 2),
             token_out: SharedImmutable::new(context, 3),
             token_in: SharedImmutable::new(context, 4),
-            current_epoch: PublicMutable::new(context, 5),
-            epoch_to_total_token_out: Map::new(context, 6, |context, slot| {
+            epoch_to_total_token_out: Map::new(context, 5, |context, slot| {
                     PublicMutable::new(context, slot)
                 },
             ),
-            epoch_to_total_token_in: Map::new(context, 7, |context, slot| {
+            epoch_to_total_token_in: Map::new(context, 6, |context, slot| {
                     PublicMutable::new(context, slot)
                 },
             ),
-            dca_notes: Map::new(context, 8,|context, slot| {
+            dca_notes: Map::new(context, 7,|context, slot| {
                     PrivateMutable::new(context, slot)
                },
             ),
-            epoch_to_dca_executed:  Map::new(context, 9,|context, slot| {
-                 PublicMutable::new(context, slot)
-            },
-            ),
+            status: PublicMutable::new(context, 8),
         }
       }
     }
 
-
+    // dca_interval: 2,592,000 if a month
     #[aztec(private)]
-    fn constructor(admin: AztecAddress, uniswap:AztecAddress, token_in:AztecAddress, token_out:AztecAddress) {
-        let selector = FunctionSelector::from_signature("_initialize((Field),(Field),(Field),(Field))");
-        context.call_public_function(context.this_address(), selector, [admin.to_field(), uniswap.to_field(), token_in.to_field(), token_out.to_field()]);
+    #[aztec(initializer)]
+    fn constructor(admin: AztecAddress, uniswap:AztecAddress, token_in:AztecAddress, token_out:AztecAddress, dca_interval: Field) {
+        // should put asserts to validate params
+        storage.admin.initialize(admin);
+        storage.uniswap.initialize(uniswap);
+        storage.token_in.initialize(token_in);
+        storage.token_out.initialize(token_out);
+        storage.dca_interval.write(dca_interval);
+        storage.last_timestamp.write(context.timestamp());
+        storage.current_epoch.write(1);
     }
 
-    /// admin should increment epoch at the end of each month
-    /// timestamp check should be added by the following two different approaches
-    /// 1) call timestamp on Aztec. This is not implemented at protocol level yet.
-    /// 2) makes this function only callable by a contract controlled by an L1 contract with timestamp checker.
+    // internally called by executeBatchSwap()
+    // check if enough time has elapsed since the last epoch update. comparing (last_timestamp + dca_interval) >= timestamp
     #[aztec(public)]
+    #[aztec(internal)]
     fn increment_epoch() {
-        // _is_admin();
-        assert(context.msg_sender().to_field() == storage.admin.read().to_field(), "invalid sender");
+        let current_time = storage.last_timestamp.read() + storage.dca_interval.read();
+        assert(current_time >= context.timestamp(), "time hasn't elapsed enough to update epoch");
+
         let new_epoch = storage.current_epoch.read() + U128::from_field(1);
-        assert(new_epoch <= U128::from_field(12), "epoch has reached max");
+        assert(new_epoch <= U128::from_field(MAX_EPOCH), "epoch has reached max");
         storage.current_epoch.write(new_epoch);
     }
 
-    // here anyone can update the acquired eth reward of the latest epoch after eth purchase
-    // but this should only occur once each epoch, so...
-    // 1: if `execute_batch_dca` for current epoch has already been executed => revert
-    // 2: if epoch_to_token_in[current_epoch] != 0 => revert
-    #[aztec(public)]
-    fn update_token_in_balance() {
-        let epoch = storage.current_epoch.read().to_field();
-        assert(storage.epoch_to_dca_executed.at(epoch).read(), "dca hasn't been executed for this epoch");
-        assert(storage.epoch_to_total_token_in.at(epoch).read() == U128::from_field(0), "already updated");
-
-        let mut total_token_in_amount:Field = 0;
-        for i in 0..12 {
-            total_token_in_amount = total_token_in_amount + storage.epoch_to_total_token_in.at(epoch).read().to_field();
-        }
-
-        let token_in = storage.token_in.read_public();
-        // get eth balance
-        let balance = Token::at(token_in).balance_of_public(&mut context, context.this_address());
-        // new balance acquried at the latest epoch = current balance - culmulative balances
-        let new_balance = balance - total_token_in_amount;
-
-        // store the new balance 
-        storage.epoch_to_total_token_in.at(epoch).write(U128::from_field(new_balance));
-    }
+    /************************************************************************
+     * Users' Private Operations
+     ************************************************************************/
 
     // This method handles token deposit from users
     // and records the amount and duration in DCA Note.
@@ -218,11 +201,62 @@ contract DCAVault {
         ); 
     }
 
+    // from user
     #[aztec(private)]
-    fn change_duration(new_duration:Field) {
-        // longer duration -> deposit increases accordingly
-        // shorter duration -> deposit decreases accordingly
+    fn claim_token_in(
+        current_epoch: U128, 
+        epoch_to_total_token_in: [U128;MAX_EPOCH],
+        epoch_to_total_token_out: [U128;MAX_EPOCH]
+        ) {
+
+        // get msg_sender's note
+        let mut dca_note = storage.dca_notes.at(context.msg_sender()).get_note(true);
+
+        // this private function can't access to public states
+        // hence, it ensures that it deals with correct public states by passing them as args and verifies it in public func
+        // claim_params() is here for the verification via _validate_claim_params()
+        let mut claim_params:[Field;27] = [0;27];
+        claim_params[0] = current_epoch.to_field();
+        claim_params[1] = dca_note.start_epoch.to_field();
+        claim_params[2] = dca_note.end_epoch.to_field();
+
+        for i in 0..12 {
+            claim_params[i + 3] = epoch_to_total_token_in[i].to_field();
+            claim_params[i + 15] = epoch_to_total_token_out[i].to_field();
+        }
+
+        context.call_public_function(
+            context.this_address(),
+            FunctionSelector::from_signature("_validate_claim_params(Field[])"), // or (Field)[]
+            claim_params
+        ); 
+
+        // calculate total eth purchased through dollar cost averages within the specified period for a user
+        let mut total_token_in_amount: U128 = U128::from_field(0);
+        let len = MAX_EPOCH as u64;
+
+        for i in 0..len {
+            let index = i as Field + U128::to_field(dca_note.start_epoch);
+            if (U128::from_field(index) <= dca_note.end_epoch) {  
+              let token_in_amount = (epoch_to_total_token_in[index] * dca_note.dca_amount / epoch_to_total_token_out[index]);
+               total_token_in_amount = total_token_in_amount + token_in_amount;
+            }
+        }
+
+        // TODO: dca note should be replaced with a new dsa note with reduced amounts 
+        // suppose partial claim is not possible, epoch nums can also be zeroed.
+
+        // individual users can execute private transfer from this address to them with no permission..?
+        let _callStackItem = context.call_private_function(
+            storage.token_out.read_private(),
+            FunctionSelector::from_signature("transfer((Field),(Field),Field,Field)"),
+            [context.this_address().to_field(), context.msg_sender().to_field(), U128::to_field(total_token_in_amount), 0]
+        );
     }
+
+    /************************************************************************
+     * Relayer's Public Operations
+     ************************************************************************/
 
     // from relayer or amind controlled by L1 contract with timestamp checkers
     // minimum_output_amount should be calculated based on uniswap twap
@@ -271,6 +305,29 @@ contract DCAVault {
         // -> make the func essentially callable by anyone!
     }
 
+    // here anyone can update the acquired eth reward of the latest epoch after eth purchase
+    // but this should only occur once each epoch, so...
+    #[aztec(public)]
+    fn update_token_in_balance() {
+        let epoch = storage.current_epoch.read().to_field();
+        assert(!storage.status.claimable.read(), "claimable should be false");
+
+        let mut total_token_in_amount:Field = 0;
+        for i in 0..12 {
+            total_token_in_amount = total_token_in_amount + storage.epoch_to_total_token_in.at(epoch).read().to_field();
+        }
+
+        let token_in = storage.token_in.read_public();
+        // get eth balance
+        let balance = Token::at(token_in).balance_of_public(&mut context, context.this_address());
+        // new balance acquried at the latest epoch = current balance - culmulative balances
+        let new_balance = balance - total_token_in_amount;
+
+        // store the new balance 
+        storage.epoch_to_total_token_in.at(epoch).write(U128::from_field(new_balance));
+        storage.status.claimable.write(true);
+    }
+
     // here probably there is need to implement create public auth wit
     // so that uniswap contract can receive(transfer) token from this cotnract.
     #[aztec(public)] 
@@ -291,69 +348,9 @@ contract DCAVault {
         0
     }
 
-    // from user
-    #[aztec(private)]
-    fn claim_token_in(
-        current_epoch: U128, 
-        epoch_diff: U128,
-        epoch_to_total_token_in: [U128;MAX_EPOCH],
-        epoch_to_total_token_out: [U128;MAX_EPOCH]
-        ) {
-
-        // get msg_sender's note
-        let mut dca_note = storage.dca_notes.at(context.msg_sender()).get_note(true);
-
-        // this private function can't access to public states
-        // hence, it ensures that it deals with correct public states by passing them as args and verifies it in public func
-        // claim_params() is here for the verification via _validate_claim_params()
-        let mut claim_params:[Field;27] = [0;27];
-        claim_params[0] = current_epoch.to_field();
-        claim_params[1] = dca_note.start_epoch.to_field();
-        claim_params[2] = dca_note.end_epoch.to_field();
-
-        for i in 0..12 {
-            claim_params[i + 3] = epoch_to_total_token_in[i].to_field();
-            claim_params[i + 15] = epoch_to_total_token_out[i].to_field();
-        }
-
-        context.call_public_function(
-            context.this_address(),
-            FunctionSelector::from_signature("_validate_claim_params(Field[])"), // or (Field)[]
-            claim_params
-        ); 
-
-        // calculate total eth purchased through dollar cost averages within the specified period for a user
-        let mut total_eth_amount: U128 = U128::from_field(0);
-        let len = MAX_EPOCH as u64;
-
-        for i in 0..len {
-            let index = i as Field + U128::to_field(dca_note.start_epoch);
-            if (U128::from_field(index) <= dca_note.end_epoch) {  
-              let eth_amount = (epoch_to_total_token_in[index] * dca_note.dca_amount / epoch_to_total_token_out[index]);
-               total_eth_amount = total_eth_amount + eth_amount;
-            }
-        }
-
-        // TODO: dca note should be replaced with a new dsa note with reduced amounts 
-        // suppose partial claim is not possible, epoch nums can also be zeroed.
-
-        // individual users can execute private transfer from this address to them with no permission..?
-        let _callStackItem = context.call_private_function(
-            storage.token_out.read_private(),
-            FunctionSelector::from_signature("transfer((Field),(Field),Field,Field)"),
-            [context.this_address().to_field(), context.msg_sender().to_field(), U128::to_field(eth_amount), 0]
-        );
-    }
-
-    #[aztec(public)]
-    #[aztec(internal)]
-    fn _initialize(admin: AztecAddress, uniswap:AztecAddress, token_in:AztecAddress, token_out:AztecAddress) {
-        assert(admin.to_field() != 0, "invalid admin address");
-        storage.admin.initialize(admin);
-        storage.uniswap.initialize(uniswap);
-        storage.token_in.initialize(token_in);
-        storage.token_out.initialize(token_out);
-    }
+    /************************************************************************
+     * Public Internal Function
+     ************************************************************************/
 
     #[aztec(public)] 
     #[aztec(internal)]

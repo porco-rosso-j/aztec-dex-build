@@ -2,5 +2,11 @@ trash
 packages/l1-contracts
 packages/src
 packages/aztec-contracts/stealth_account
+packages/aztec-contracts/bn254
+packages/aztec-contracts/bn254-rs
+packages/aztec-contracts/diagrams
+packages/aztec-contracts/test
+
+
 
 .DS_Store

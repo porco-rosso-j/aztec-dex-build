@@ -1,0 +1,7 @@
+[package]
+authors = ["Elena Fuentes"]
+compiler_version = "0.28.0"
+name = "ElGamal Noir"
+type = "lib"
+
+[dependencies]

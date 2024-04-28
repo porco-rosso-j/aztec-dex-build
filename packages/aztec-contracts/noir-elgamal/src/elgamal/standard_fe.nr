@@ -11,12 +11,36 @@ fn single_standard_encryption_fe(
   gen: Field, 
   pub_key: Field, 
   m: Field, 
-  r: Field) -> (Field, Field) {
+  r: Field
+  ) -> (Field, Field) {
 
-  let c1 = gen.pow_32(r);
-  let temp = pub_key.pow_32(r);
-  let c2 = m * temp;
+  // let c1 = gen.pow_32(r);
+  // let temp = pub_key.pow_32(r);
+  // let c2 = m * temp;
+  // let c1 = r.pow_32(gen);
+  // let temp1 = r.pow_32(pub_key);
+  // let temp2 = m.pow_32(gen) ;
+  // let c2 = temp1 + temp2;
+
+  //　single_hom_encryption_fe
+  // let c1 = gen.pow_32(r);
+   let c1 = gen * r;
+  let temp1 = pub_key.pow_32(r);
+  let temp2 = gen.pow_32(m) ;
+  let c2 = temp2 * temp1;
   (c1, c2)
+}
+
+#[test]
+fn testsingle_standard_encryption_fe() {
+  let gen = 3618502788666131106986593281521497120414687020801267626233049500247285301248;
+  let g_pub_key = 0x8601d0dec944deca8918a6431526acb8530afea2ffa295142b348dfbce36c20b;
+  let m = 42830;
+  let r = 1152000579019524719769048073517805207578464470827627862468450398349088064047;
+  let (c1, c2) = single_standard_encryption_fe(gen, g_pub_key, m, r);
+  std::println(c1);
+  std::println(c2);
+
 }
 
 // TODO assumes exponent under 32 bits?

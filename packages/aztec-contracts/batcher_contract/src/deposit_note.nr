@@ -5,48 +5,39 @@ use dep::aztec::{
     hash::pedersen_hash, protocol_types::traits::Empty
 };
 
-global DCA_NOTE_LEN: Field = 5;
-global MAX_EPOCH: Field = 12;
+global DEPOSIT_NOTE_LEN: Field = 3;
 
 #[aztec(note)]
-struct DCANote {
-    dca_amount: U128,
-    total_deoposit_amount: U128,
-    start_epoch: U128,
-    end_epoch: U128,
+struct DepositNote {
+    round: Field,
+    amount_out: Field,
     owner: AztecAddress,
 }
 
-impl DCANote {
+impl DepositNote {
     pub fn new(
-        dca_amount: U128,
-        total_deoposit_amount: U128,
-        start_epoch: U128,
-        end_epoch: U128,
+        round: Field,
+        amount_out: Field,
         owner: AztecAddress
     ) -> Self {
-        DCANote { 
-            dca_amount, 
-            total_deoposit_amount, 
-            start_epoch, 
-            end_epoch, 
+        DepositNote { 
+            round,
+            amount_out, 
             owner,
             header: NoteHeader::empty()
         }
     }
 
     pub fn empty() -> Self {
-        DCANote::new(
-            U128::from_field(0), 
-            U128::from_field(0),
-            U128::from_field(0),
-            U128::from_field(0),
+        DepositNote::new(
+            0,
+            0,
             AztecAddress::from_field(0),
         )
     }
 }
 
-impl NoteInterface<DCA_NOTE_LEN> for DCANote {
+impl NoteInterface<DEPOSIT_NOTE_LEN> for DepositNote {
     fn compute_nullifier(self, context: &mut PrivateContext) -> Field {
         let note_hash_for_nullify = compute_note_hash_for_consumption(self);
         let secret = context.request_nullifier_secret_key(self.owner);

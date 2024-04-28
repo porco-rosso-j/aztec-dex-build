@@ -1,8 +1,0 @@
-[package]
-name = "he_add"
-type = "lib"
-authors = [""]
-compiler_version = ">=0.28.0"
-
-[dependencies]
-noir_elgamal = { path = "../noir-elgamal/" }

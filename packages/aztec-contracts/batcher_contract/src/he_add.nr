@@ -25,11 +25,7 @@ global gen: Field = 1094412143;
         c1_2: Field, 
         c2_2: Field) -> (Field, Field) 
     {
-        if ((c1_1 == 0) & (c2_1 == 0)) {
-            (c1_2, c2_2)
-        } else {
-            (c1_1*c1_2, c2_1*c2_2)
-        }
+         (c1_1*c1_2, c2_1*c2_2)
     }
 
     fn decrypt(

@@ -25,8 +25,8 @@ impl Round {
 impl Deserialize<ROUND_SERIALIZED_LEN> for Round {
     fn deserialize(fields: [Field; ROUND_SERIALIZED_LEN]) -> Self {
         let mut encrypted_token_out_amount: [Field;2] = [0;2];
-        encrypted_token_out_amount[0] = fields[4];
-        encrypted_token_out_amount[1] = fields[5];
+        encrypted_token_out_amount[0] = fields[3];
+        encrypted_token_out_amount[1] = fields[4];
 
         Round { 
             token_in_amount: fields[0],

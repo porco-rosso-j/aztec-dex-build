@@ -276,34 +276,31 @@ contract BatcherVault {
         encrypted_amount: [Field;2],
         secret_key: Field,
         token_out_amount_cancelled: Field,
-        input_asset_bridge: AztecAddress,
-        output_asset_bridge: AztecAddress,
+        tokne_in: AztecAddress,
+        token_out: AztecAddress,
         nonce_for_transfer_approval: Field,
-        uniswap_fee_tier: Field,
-        minimum_output_amount: Field,
-        secret_hash_for_L1_to_l2_message: Field,
-        caller_on_L1: EthAddress,
         nonce_for_swap_approval: Field
-    ) {
+    ) -> pub Field {
         // caller should be an authorized relayer 
         // assert(context.msg_sender() == storage.batch_relayer.relayer, "caller must be relayer");
 
         let amount_out = he_add::decrypt(encrypted_amount[0], encrypted_amount[1], secret_key);
         let amount_out_minus_cancelled = amount_out - token_out_amount_cancelled;
-
-        context.call_public_function(
-            context.this_address(),
-            FunctionSelector::from_signature("validate_execute_batch((Field),Field,Field,Field,Field)"), 
-            [
-                context.msg_sender().to_field(),
-                encrypted_amount[0], 
-                encrypted_amount[1], 
-                amount_out_minus_cancelled, 
-                token_out_amount_cancelled
-            ]
-        );  
+        amount_out
+        // context.call_public_function(
+        //     context.this_address(),
+        //     FunctionSelector::from_signature("validate_execute_batch((Field),Field,Field,Field,Field)"), 
+        //     [
+        //         context.msg_sender().to_field(),
+        //         encrypted_amount[0], 
+        //         encrypted_amount[1], 
+        //         amount_out_minus_cancelled, 
+        //         token_out_amount_cancelled
+        //     ]
+        // );  
 
         // TODO: unshield / redeem if necessary
+
         
         // let target = storage.target.read_public();
         // Uniswap::at(target).swap_public(
@@ -518,8 +515,21 @@ contract BatcherVault {
     fn _add_token_out_amount(enc_c1: Field, enc_c2:Field) {
         let current_round = storage.current_round.read();
         let mut round = storage.rounds.at(current_round).read();
+        let mut new_c1 = 0;
+        let mut new_c2 = 0;
+
         let (c1, c2) = round.get_encrypted_amount();
-        let (new_c1, new_c2) = he_add::add(c1, c2, enc_c1, enc_c2);
+
+        // if the existing encrypted valeus are 0
+        if ((c1 == 0) & (c2 == 0)) {
+            new_c1 = enc_c1;
+            new_c2 = enc_c2;
+        // if there is already values inserted
+        } else {
+            let (_new_c1, _new_c2) = he_add::add(c1, c2, enc_c1, enc_c2);
+            new_c1 = _new_c1;
+            new_c2 = _new_c2;
+        }
 
         round.encrypted_token_out_amount[0] = new_c1;
         round.encrypted_token_out_amount[1] = new_c2;

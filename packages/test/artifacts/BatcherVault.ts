@@ -161,61 +161,61 @@ deposit_notes: {
   /** Type-safe wrappers for the public methods exposed by the contract. */
   public methods!: {
     
-    /** get_batch_relayer() */
-    get_batch_relayer: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
-    /** get_token_out() */
-    get_token_out: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
-    /** cancel_batch_and_claim(current_round: field, secret_hash: field) */
-    cancel_batch_and_claim: ((current_round: FieldLike, secret_hash: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
-    /** deposit_to_batch(current_round: field, amount_out: field, relayer_he_pubkey: field, he_add_rand: field, nonce: field) */
-    deposit_to_batch: ((current_round: FieldLike, amount_out: FieldLike, relayer_he_pubkey: FieldLike, he_add_rand: FieldLike, nonce: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
-    /** get_sk_hash(he_secret_key: field) */
-    get_sk_hash: ((he_secret_key: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
-    /** compute_note_hash_and_nullifier(contract_address: struct, nonce: field, storage_slot: field, note_type_id: field, serialized_note: array) */
-    compute_note_hash_and_nullifier: ((contract_address: AztecAddressLike, nonce: FieldLike, storage_slot: FieldLike, note_type_id: FieldLike, serialized_note: FieldLike[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
-    /** dipute_relayer(he_secret_key: field, new_sk_hash: field, new_he_pub_key: field, new_he_secret_key: field, new_relayer: struct, secret_hash: field, nonce: field) */
-    dipute_relayer: ((he_secret_key: FieldLike, new_sk_hash: FieldLike, new_he_pub_key: FieldLike, new_he_secret_key: FieldLike, new_relayer: AztecAddressLike, secret_hash: FieldLike, nonce: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
-    /** claim_token_in(round: field, total_token_in: field, total_token_out: field) */
-    claim_token_in: ((round: FieldLike, total_token_in: FieldLike, total_token_out: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
-    /** get_encrypted_sum(current_round: field) */
-    get_encrypted_sum: ((current_round: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
-    /** execute_batch(encrypted_amount: array, secret_key: field, token_out_amount_cancelled: field, input_asset_bridge: struct, output_asset_bridge: struct, nonce_for_transfer_approval: field, uniswap_fee_tier: field, minimum_output_amount: field, secret_hash_for_L1_to_l2_message: field, caller_on_L1: struct, nonce_for_swap_approval: field) */
-    execute_batch: ((encrypted_amount: FieldLike[], secret_key: FieldLike, token_out_amount_cancelled: FieldLike, input_asset_bridge: AztecAddressLike, output_asset_bridge: AztecAddressLike, nonce_for_transfer_approval: FieldLike, uniswap_fee_tier: FieldLike, minimum_output_amount: FieldLike, secret_hash_for_L1_to_l2_message: FieldLike, caller_on_L1: EthAddressLike, nonce_for_swap_approval: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
-    /** spend_public_authwit(inner_hash: field) */
-    spend_public_authwit: ((inner_hash: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
-    /** finalize_execute(secret_hash_for_redeeming_minted_notes: field, amount: field, secret_for_L1_to_L2_message_consumption: field) */
-    finalize_execute: ((secret_hash_for_redeeming_minted_notes: FieldLike, amount: FieldLike, secret_for_L1_to_L2_message_consumption: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
-    /** check_sk_hash(sk_hash: field) */
-    check_sk_hash: ((sk_hash: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
     /** get_round() */
     get_round: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
-    /** stake(relayer: struct, token: struct, amount: field, nonce: field) */
-    stake: ((relayer: AztecAddressLike, token: AztecAddressLike, amount: FieldLike, nonce: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
-    /** get_admin() */
-    get_admin: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
-    /** get_target_address() */
-    get_target_address: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** constructor(admin: struct, target: struct, token_in: struct, token_out: struct, relayer: struct, bonding_token: struct, bonding_amount: field, he_pub_key: field, sk_hash: field, interval: field, he_secret_key: field) */
     constructor: ((admin: AztecAddressLike, target: AztecAddressLike, token_in: AztecAddressLike, token_out: AztecAddressLike, relayer: AztecAddressLike, bonding_token: AztecAddressLike, bonding_amount: FieldLike, he_pub_key: FieldLike, sk_hash: FieldLike, interval: FieldLike, he_secret_key: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
+    /** execute_batch(encrypted_amount: array, secret_key: field, token_out_amount_cancelled: field, tokne_in: struct, token_out: struct, nonce_for_transfer_approval: field, nonce_for_swap_approval: field) */
+    execute_batch: ((encrypted_amount: FieldLike[], secret_key: FieldLike, token_out_amount_cancelled: FieldLike, tokne_in: AztecAddressLike, token_out: AztecAddressLike, nonce_for_transfer_approval: FieldLike, nonce_for_swap_approval: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** dipute_relayer(he_secret_key: field, new_sk_hash: field, new_he_pub_key: field, new_he_secret_key: field, new_relayer: struct, secret_hash: field, nonce: field) */
+    dipute_relayer: ((he_secret_key: FieldLike, new_sk_hash: FieldLike, new_he_pub_key: FieldLike, new_he_secret_key: FieldLike, new_relayer: AztecAddressLike, secret_hash: FieldLike, nonce: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** get_admin() */
+    get_admin: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** deposit_to_batch(current_round: field, amount_out: field, relayer_he_pubkey: field, he_add_rand: field, nonce: field) */
+    deposit_to_batch: ((current_round: FieldLike, amount_out: FieldLike, relayer_he_pubkey: FieldLike, he_add_rand: FieldLike, nonce: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** check_sk_hash(sk_hash: field) */
+    check_sk_hash: ((sk_hash: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** spend_public_authwit(inner_hash: field) */
+    spend_public_authwit: ((inner_hash: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
     /** get_token_in() */
     get_token_in: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** compute_note_hash_and_nullifier(contract_address: struct, nonce: field, storage_slot: field, note_type_id: field, serialized_note: array) */
+    compute_note_hash_and_nullifier: ((contract_address: AztecAddressLike, nonce: FieldLike, storage_slot: FieldLike, note_type_id: FieldLike, serialized_note: FieldLike[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** cancel_batch_and_claim(current_round: field, secret_hash: field) */
+    cancel_batch_and_claim: ((current_round: FieldLike, secret_hash: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** get_encrypted_sum(current_round: field) */
+    get_encrypted_sum: ((current_round: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** stake(relayer: struct, token: struct, amount: field, nonce: field) */
+    stake: ((relayer: AztecAddressLike, token: AztecAddressLike, amount: FieldLike, nonce: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** get_target_address() */
+    get_target_address: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** finalize_execute(secret_hash_for_redeeming_minted_notes: field, amount: field, secret_for_L1_to_L2_message_consumption: field) */
+    finalize_execute: ((secret_hash_for_redeeming_minted_notes: FieldLike, amount: FieldLike, secret_for_L1_to_L2_message_consumption: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** get_batch_relayer() */
+    get_batch_relayer: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** get_sk_hash(he_secret_key: field) */
+    get_sk_hash: ((he_secret_key: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** get_token_out() */
+    get_token_out: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** claim_token_in(round: field, total_token_in: field, total_token_out: field) */
+    claim_token_in: ((round: FieldLike, total_token_in: FieldLike, total_token_out: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
   };
 }

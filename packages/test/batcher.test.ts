@@ -40,6 +40,8 @@ let eth: TokenContract;
 let dai: TokenContract;
 let amm: AMMMockContract;
 
+let encrypted_amount: Fr[];
+
 const TIMEOUT = 360_000;
 
 beforeAll(async () => {
@@ -188,8 +190,7 @@ describe("E2E Batcher setup", () => {
 		console.log("balance: ", balance);
 	});
 
-	it("users should successfully make deposit to batcher contract", async () => {
-		// const rand = Fr.random();
+	it("userA should successfully make deposit to batcher contract", async () => {
 		const rand = 1878145627n;
 		const nonce = Fr.random();
 		const currennt_round = await batcher.methods.get_round().simulate();
@@ -229,6 +230,70 @@ describe("E2E Batcher setup", () => {
 			.simulate();
 
 		console.log("encrypted_sum: ", encrypted_sum);
+	});
+
+	it("userB should successfully make deposit to batcher contract", async () => {
+		const rand = 37814214n;
+		const nonce = Fr.random();
+		const currennt_round = await batcher.methods.get_round().simulate();
+		const deposit_amount = 400_000n;
+
+		const action = dai
+			.withWallet(userB)
+			.methods.transfer(
+				userB.getAddress(),
+				batcher.address,
+				deposit_amount,
+				nonce
+			);
+
+		const witness = await userB.createAuthWit({
+			caller: batcher.address,
+			action,
+		});
+		await userB.addAuthWitness(witness);
+
+		await batcher
+			.withWallet(userB)
+			.methods.deposit_to_batch(
+				currennt_round,
+				deposit_amount,
+				HE_PUBLIC_KEY,
+				rand,
+				nonce
+			)
+			.send()
+			.wait();
+
+		console.log("deposit_to_batch?");
+
+		const encrypted_sum = await batcher.methods
+			.get_encrypted_sum(currennt_round)
+			.simulate();
+
+		console.log("encrypted_sum: ", encrypted_sum);
+		encrypted_amount = [encrypted_sum[0], encrypted_sum[1]];
+	});
+
+	it("relayer successfully decrypt and swap the value", async () => {
+		const nonce = Fr.random();
+		const output = await batcher.methods
+			.execute_batch(
+				encrypted_amount,
+				HE_PRIVATE_KEY,
+				0,
+				eth.address,
+				dai.address,
+				nonce,
+				nonce
+			)
+			.simulate();
+
+		console.log("output: ", output);
+		// TODO: both/either addition and decryption goes wrong here.
+		// expected: 500000
+		// output: 40000000000 ( userA input * userB input )
+		// possibly need BigInt lib
 	});
 
 	// 1: deposit * 2

@@ -2,7 +2,11 @@ mod deposit_note;
 mod interfaces;
 mod relayer;
 mod round;
-mod elgamal;
+mod he_add;
+
+// aztec-cli codegen ./target/ -o ../../test/artifacts --ts
+
+
 
 contract BatcherVault {
     use dep::aztec::prelude::{
@@ -24,7 +28,7 @@ contract BatcherVault {
     use crate::round::{Round, ROUND_SERIALIZED_LEN};
     
     // libs
-    use crate::elgamal;
+    use crate::he_add;
 
     #[aztec(storage)]
     struct Storage {
@@ -74,6 +78,48 @@ contract BatcherVault {
         interval: Field,
         he_secret_key: Field
     ) {
+
+        // validate that hash(new_he_secret_key) == sk_hash
+        let computed_sk_hash = dep::std::hash::pedersen_hash([he_secret_key]);
+        assert(sk_hash == computed_sk_hash, "invalid sk_hash");
+
+        // TODO: fail w/ "Cannot satisfy constraint 'self.__to_le_bits(bit_size)'"
+        // validate that new_he_pub_key corresponds to new_he_secret_key
+        // assert(he_add::validate_keypair(he_pub_key, he_secret_key), "invalid he_pub_key");
+
+        context.call_public_function(
+            context.this_address(),
+            FunctionSelector::from_signature("_initialize((Field),(Field),(Field),(Field),(Field),(Field),Field,Field,Field,Field)"), 
+            [
+                admin.to_field(),
+                target.to_field(),
+                token_in.to_field(),
+                token_out.to_field(),
+                relayer.to_field(), 
+                bonding_token.to_field(), 
+                bonding_amount,
+                he_pub_key,
+                sk_hash,
+                interval
+            ]
+        );
+    }
+
+    #[aztec(public)]
+    #[aztec(internal)]
+    #[aztec(noinitcheck)]
+    fn _initialize(
+        admin: AztecAddress, 
+        target:AztecAddress, 
+        token_in:AztecAddress, 
+        token_out:AztecAddress, 
+        relayer: AztecAddress,
+        bonding_token: AztecAddress, 
+        bonding_amount: Field,
+        he_pub_key: Field,
+        sk_hash: Field,
+        interval: Field
+    ) {
         // should put asserts to validate params
         storage.admin.initialize(admin);
         storage.target.initialize(target);
@@ -81,13 +127,6 @@ contract BatcherVault {
         storage.token_out.initialize(token_out);
 
         storage.current_round.write(1);
-
-        // validate that hash(new_he_secret_key) == sk_hash
-        let computed_sk_hash = dep::std::hash::pedersen_hash([he_secret_key]);
-        assert(sk_hash == computed_sk_hash, "invalid sk_hash");
-
-        // validate that new_he_pub_key corresponds to new_he_secret_key
-        assert(elgamal::validate_keypair(he_pub_key, he_secret_key), "invalid he_pub_key");
 
         // initialize BatchRelayer
         let batch_relayer = BatchRelayer::new(
@@ -103,12 +142,13 @@ contract BatcherVault {
         // store BatchRelayer
         storage.batch_relayer.write(batch_relayer);
 
-        // relayer stakes bonding
-        context.call_public_function(
-            context.this_address(),
-            FunctionSelector::from_signature("stake((Field),(Field),Field)"), 
-            [relayer.to_field(), bonding_token.to_field(), bonding_amount]
-        );
+        // // relayer stakes bonding
+        // context.call_public_function(
+        //     context.this_address(),
+        //     FunctionSelector::from_signature("stake((Field),(Field),Field,Field)"), 
+        //     [relayer.to_field(), bonding_token.to_field(), bonding_amount, nonce],
+        //      GasOpts::default()
+        // ).assert_empty();
     }
 
     /************************************************************************
@@ -122,13 +162,15 @@ contract BatcherVault {
     /************************************************************************
      * Users' Operations : Deposit, Withdraw, and Claim
      ************************************************************************/
+
+    // TODO: some checks if relayer has already made a deposit before users depositing
     #[aztec(private)]
     fn deposit_to_batch(
         current_round: Field,
         amount_out: Field, 
         relayer_he_pubkey: Field,
-        elgamal_rand: Field,
-        init: bool // true if deposit_note for an acc has never been created
+        he_add_rand: Field,
+        nonce: Field
     ) {
         // TODO: validate current_round
 
@@ -147,15 +189,15 @@ contract BatcherVault {
             sender,
             context.this_address(),
             amount_out,
-            0
+            nonce
         );
 
         // TODO: validate relayer pubkey here
 
-        let (enc_c1, enc_c2) = elgamal::encrypt(
+        let (enc_c1, enc_c2) = he_add::encrypt(
             amount_out,
             relayer_he_pubkey, 
-            elgamal_rand
+            he_add_rand
         );
 
         context.call_public_function(
@@ -246,7 +288,7 @@ contract BatcherVault {
         // caller should be an authorized relayer 
         // assert(context.msg_sender() == storage.batch_relayer.relayer, "caller must be relayer");
 
-        let amount_out = elgamal::decrypt(encrypted_amount[0], encrypted_amount[1], secret_key);
+        let amount_out = he_add::decrypt(encrypted_amount[0], encrypted_amount[1], secret_key);
         let amount_out_minus_cancelled = amount_out - token_out_amount_cancelled;
 
         context.call_public_function(
@@ -374,7 +416,8 @@ contract BatcherVault {
         new_he_pub_key:Field,
         new_he_secret_key: Field,
         new_relayer: AztecAddress,
-        secret_hash: Field
+        secret_hash: Field,
+        nonce:Field
         ) {
         let sk_hash = dep::std::hash::pedersen_hash([he_secret_key]);
 
@@ -388,13 +431,13 @@ contract BatcherVault {
         let new_computed_sk_hash = dep::std::hash::pedersen_hash([new_he_secret_key]);
         assert(new_sk_hash == new_computed_sk_hash, "invalid_new_sk_hash");
 
-        // TODO: validate that new_he_pub_key corresponds to new_he_secret_key
-        // elgamal_lib.validate_keypair(new_he_pub_key, new_he_secret_key);
+        // validate that new_he_pub_key corresponds to new_he_secret_key
+        assert(he_add::validate_keypair(new_he_pub_key, new_he_secret_key), "invalid new_he_pub_key");
 
         context.call_public_function(
             context.this_address(),
-            FunctionSelector::from_signature("replace_relayer_and_slash_stake(Field,Field,(Field),Field)"),
-            [new_sk_hash, new_he_pub_key, new_relayer.to_field(), secret_hash]
+            FunctionSelector::from_signature("replace_relayer_and_slash_stake(Field,Field,(Field),Field,Field)"),
+            [new_sk_hash, new_he_pub_key, new_relayer.to_field(), secret_hash, nonce]
         ); 
     }
 
@@ -412,7 +455,7 @@ contract BatcherVault {
     // 3: make a new stake deposit from a new layer
     #[aztec(public)]
     #[aztec(internal)]
-    fn replace_relayer_and_slash_stake(sk_hash: Field, new_he_pub_key: Field, new_relayer:AztecAddress, secret_hash:Field) {
+    fn replace_relayer_and_slash_stake(sk_hash: Field, new_he_pub_key: Field, new_relayer:AztecAddress, secret_hash:Field, nonce:Field) {
         // replacement from slashed relayer to a new relayer ( disputer )
         let mut relayer = storage.batch_relayer.read();
         relayer.relayer = new_relayer;
@@ -432,16 +475,17 @@ contract BatcherVault {
         // new stake deposit from new relayer
         context.call_public_function(
             context.this_address(),
-            FunctionSelector::from_signature("stake((Field),(Field),Field)"), 
-            [new_relayer.to_field(), relayer.bonding_token.to_field(), relayer.bonding_amount],
+            FunctionSelector::from_signature("stake((Field),(Field),Field,Field)"), 
+            [new_relayer.to_field(), relayer.bonding_token.to_field(), relayer.bonding_amount, nonce],
             GasOpts::default()
         ).assert_empty();  
     }
 
     #[aztec(public)] 
-    #[aztec(internal)] 
-    fn stake(relayer: AztecAddress, token:AztecAddress, amount:Field) {
-        // TODO: have a minimul bonding_amount and compare amount against it
+    fn stake(relayer: AztecAddress, token:AztecAddress, amount:Field, nonce:Field) {
+        let batch_relayer = storage.batch_relayer.read();
+        assert(U128::from_field(amount) >= U128::from_field(batch_relayer.bonding_amount), "insufficient bonding amount");
+        // TODO: also verify caller == relayer in normal situation..?
 
         // transfer public
         Token::at(token).transfer_public(
@@ -449,7 +493,7 @@ contract BatcherVault {
             relayer,
             context.this_address(), 
             amount,
-            0
+            nonce
         );
     }
 
@@ -475,7 +519,7 @@ contract BatcherVault {
         let current_round = storage.current_round.read();
         let mut round = storage.rounds.at(current_round).read();
         let (c1, c2) = round.get_encrypted_amount();
-        let (new_c1, new_c2) = elgamal::add(c1, c2, enc_c1, enc_c2);
+        let (new_c1, new_c2) = he_add::add(c1, c2, enc_c1, enc_c2);
 
         round.encrypted_token_out_amount[0] = new_c1;
         round.encrypted_token_out_amount[1] = new_c2;
@@ -503,7 +547,7 @@ contract BatcherVault {
         storage.admin.read().to_field()
     }
 
-    unconstrained fn get_uniswap_address() -> pub Field {
+    unconstrained fn get_target_address() -> pub Field {
         storage.target.read_public().to_field()
     }
 
@@ -517,6 +561,29 @@ contract BatcherVault {
 
     unconstrained fn get_round() -> pub Field {
         storage.current_round.read()
+    }
+
+    unconstrained fn get_batch_relayer() -> pub BatchRelayer {
+        storage.batch_relayer.read()
+    }
+
+    unconstrained fn get_encrypted_sum(current_round:Field) -> pub [Field;2] {
+        let mut ret:[Field;2] = [0;2];
+        let (c1, c2) = storage.rounds.at(current_round).read().get_encrypted_amount();
+        ret[0] = c1;
+        ret[1] = c2;
+        ret
+    }
+
+    unconstrained fn get_sk_hash(he_secret_key: Field) -> pub Field {
+        dep::std::hash::pedersen_hash([he_secret_key])
+    }
+
+    #[test]
+    fn test_get_sk_hash() {
+        let sk = 711563766;
+        let ret = get_sk_hash(sk);
+        dep::std::println(ret);
     }
     
 }

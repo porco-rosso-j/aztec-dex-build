@@ -9,6 +9,7 @@ struct Round {
     token_out_amount: Field,
     encrypted_token_out_amount: [Field; 2], // [c1, c2]
     executed: bool,
+    // minimum batch count
 }
 
 impl Round {

@@ -66,6 +66,10 @@ fn testsingle_standard_encryption_fe() {
 
   let ret = single_decryption_fe(ret_1,ret_2, x); 
   std::println(ret);
+		// TODO: both/either addition and decryption goes wrong here.
+		// expected: 500000
+		// output: 40000000000 ( userA input * userB input )
+		// possibly need BigInt lib
 
 }
 

@@ -1,16 +1,2 @@
+node_modules
 trash
-packages/l1-contracts
-packages/aztec-contracts/stealth_account
-packages/aztec-contracts/bn254
-packages/aztec-contracts/bn254-rs
-packages/aztec-contracts/diagrams
-packages/aztec-contracts/test
-packages/aztec-contracts/batcher
-packages/aztec-contracts/dca/
-packages/aztec-contracts/diagrams
-packages/aztec-contracts/shieldswap
-packages/circuits/
-
-
-
-.DS_Store

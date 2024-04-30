@@ -1,0 +1,7 @@
+[package]
+name = "noir_elgamal"
+type = "lib"
+authors = ["jat9292","critesjosh"]
+compiler_version = ">=0.27.0"
+
+[dependencies]

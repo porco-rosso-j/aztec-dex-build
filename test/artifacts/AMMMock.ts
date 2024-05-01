@@ -126,28 +126,28 @@ token1: {
   /** Type-safe wrappers for the public methods exposed by the contract. */
   public methods!: {
     
-    /** compute_note_hash_and_nullifier(contract_address: struct, nonce: field, storage_slot: field, note_type_id: field, serialized_note: array) */
-    compute_note_hash_and_nullifier: ((contract_address: AztecAddressLike, nonce: FieldLike, storage_slot: FieldLike, note_type_id: FieldLike, serialized_note: FieldLike[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
-    /** constructor(admin: struct, token0: struct, token1: struct) */
-    constructor: ((admin: AztecAddressLike, token0: AztecAddressLike, token1: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** swap_private(amount0: field, amount1: field, nonce0: field, nonce1: field, secret_hash: field) */
+    swap_private: ((amount0: FieldLike, amount1: FieldLike, nonce0: FieldLike, nonce1: FieldLike, secret_hash: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** get_token1() */
     get_token1: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** get_admin() */
-    get_admin: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
-    /** get_token0() */
-    get_token0: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** compute_note_hash_and_nullifier(contract_address: struct, nonce: field, storage_slot: field, note_type_id: field, serialized_note: array) */
+    compute_note_hash_and_nullifier: ((contract_address: AztecAddressLike, nonce: FieldLike, storage_slot: FieldLike, note_type_id: FieldLike, serialized_note: FieldLike[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** add_liquidity(token0: struct, amount: field, nonce: field) */
     add_liquidity: ((token0: AztecAddressLike, amount: FieldLike, nonce: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
+    /** get_token0() */
+    get_token0: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
     /** swap_public(amount0: field, amount1: field, nonce0: field, nonce1: field) */
     swap_public: ((amount0: FieldLike, amount1: FieldLike, nonce0: FieldLike, nonce1: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** swap_private(amount0: field, amount1: field, nonce0: field, nonce1: field, secret_hash: field) */
-    swap_private: ((amount0: FieldLike, amount1: FieldLike, nonce0: FieldLike, nonce1: FieldLike, secret_hash: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** get_admin() */
+    get_admin: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** constructor(admin: struct, token0: struct, token1: struct) */
+    constructor: ((admin: AztecAddressLike, token0: AztecAddressLike, token1: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
   };
 }

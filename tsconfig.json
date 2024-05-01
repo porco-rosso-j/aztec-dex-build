@@ -8,6 +8,7 @@
 		"moduleResolution": "NodeNext",
 		"strict": true,
 		"declaration": true,
+		"allowJs": true,
 		"allowSyntheticDefaultImports": true,
 		"esModuleInterop": true,
 		"downlevelIteration": true,

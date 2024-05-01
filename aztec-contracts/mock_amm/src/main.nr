@@ -110,7 +110,7 @@ contract AMMMock {
         let token0 = storage.token0.read_private();
         let token1 = storage.token1.read_private();
 
-        // transfer(shield) eth out 
+        // optimistically transfer(shield) eth out to batcher pub -> pri
         Token::at(token0).shield(
             &mut context, 
             context.this_address(), 
@@ -119,7 +119,7 @@ contract AMMMock {
             nonce0
         );
 
-        // transfer(unshield) dai in
+        // transfer(unshield) dai from batcher pri -> pub
         Token::at(token1).unshield(
             &mut context, 
             context.msg_sender(), 

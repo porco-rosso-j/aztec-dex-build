@@ -14,7 +14,7 @@ it.skip("test", async () => {
 	console.log("div: ", div.toBigInt());
 });
 
-it("test", async () => {
+it.skip("test", async () => {
 	const num = new Fr(2958935137635786380114613843419925192240n);
 	// const num = new Fr(73973378440894659502865346085498129804n);
 	const num2 = new Fr(73973378440894659502865346085498129804n);

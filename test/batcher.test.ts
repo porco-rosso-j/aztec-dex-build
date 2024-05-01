@@ -7,6 +7,7 @@ import {
 	initAztecJs,
 	GrumpkinScalar,
 	generatePublicKey,
+	computeMessageSecretHash,
 } from "@aztec/aztec.js";
 import { jest, beforeAll, it, describe, expect } from "@jest/globals";
 import { getInitialTestAccountsWallets } from "@aztec/accounts/testing";
@@ -29,6 +30,8 @@ import {
 	SK_HASH,
 } from "./utils/constants.js";
 import { computePartialAddress } from "@aztec/circuits.js";
+import * as bjj from "babyjubjub-utils";
+import { addPendingShieldNoteToPXE } from "./utils/addNote.js";
 
 let pxe: PXE;
 let batcher: BatcherVaultContract;
@@ -43,7 +46,7 @@ let amm: AMMMockContract;
 
 let encrypted_amount: Fr[];
 
-const TIMEOUT = 360_000;
+const TIMEOUT = 300_000;
 
 beforeAll(async () => {
 	pxe = createPXEClient(SANDBOX_URL);
@@ -77,7 +80,7 @@ beforeAll(async () => {
 		eth,
 		dai.address
 	);
-}, 360_000);
+}, TIMEOUT);
 
 describe("E2E Batcher setup", () => {
 	jest.setTimeout(TIMEOUT);
@@ -92,14 +95,6 @@ describe("E2E Batcher setup", () => {
 			amm.address, // target
 			eth.address, // token_in
 			dai.address // token_out
-			// admin_relayer.getAddress(), // relayer
-			// dai.address, // bonding_token
-			// BONDING_AMOUNT, // bonding_amount
-			// [HE_PUBLIC_KEY.point.x, HE_PUBLIC_KEY.point.y], // he_pub_key
-			// SK_HASH, // sk_hash
-			// INTERVAL, // interval
-			// HE_PRIVATE_KEY, // he_secret_key
-			// RAND_INIT
 		);
 
 		const batcherInstance = batcherContractDeployment.getInstance();
@@ -118,12 +113,15 @@ describe("E2E Batcher setup", () => {
 				BONDING_AMOUNT, // bonding_amount
 				[HE_PUBLIC_KEY.point.x, HE_PUBLIC_KEY.point.y], // he_pub_key
 				SK_HASH, // sk_hash
-				INTERVAL, // interval
 				HE_PRIVATE_KEY, // he_secret_key
-				RAND_INIT
+				INTERVAL // interval
 			)
 			.send()
 			.wait();
+		console.log("relayer initialized");
+
+		await batcher.methods.init_encrypted_note(RAND_INIT).send().wait();
+		console.log("encrypted_note initialized");
 
 		const admin = await batcher.methods.get_admin().simulate();
 		expect(admin).toBe(admin_relayer.getAddress().toBigInt());
@@ -194,10 +192,11 @@ describe("E2E Batcher setup", () => {
 	});
 
 	it("userA should successfully make deposit to batcher contract", async () => {
-		const rand = 1878145627n;
+		const rands = [Fr.random(), Fr.random()];
 		const nonce = Fr.random();
 		const currennt_round = await batcher.methods.get_round().simulate();
-		const deposit_amount = 100_000n;
+		// const deposit_amount = BigInt(4e18);
+		const deposit_amount = BigInt(4e15);
 
 		const action = dai
 			.withWallet(userA)
@@ -220,13 +219,11 @@ describe("E2E Batcher setup", () => {
 				currennt_round,
 				deposit_amount,
 				HE_PUBLIC_KEY,
-				rand,
+				rands,
 				nonce
 			)
 			.send()
 			.wait();
-
-		console.log("deposit_to_batch?");
 
 		const encrypted_sum = await batcher.methods
 			.get_encrypted_sum(currennt_round)
@@ -236,10 +233,11 @@ describe("E2E Batcher setup", () => {
 	});
 
 	it("userB should successfully make deposit to batcher contract", async () => {
-		const rand = 37814214n;
+		const rands = [Fr.random(), Fr.random()];
 		const nonce = Fr.random();
 		const currennt_round = await batcher.methods.get_round().simulate();
-		const deposit_amount = 400_000n;
+		// const deposit_amount = BigInt(1e18);
+		const deposit_amount = BigInt(1e15);
 
 		const action = dai
 			.withWallet(userB)
@@ -262,13 +260,11 @@ describe("E2E Batcher setup", () => {
 				currennt_round,
 				deposit_amount,
 				HE_PUBLIC_KEY,
-				rand,
+				rands,
 				nonce
 			)
 			.send()
 			.wait();
-
-		console.log("deposit_to_batch?");
 
 		const encrypted_sum = await batcher.methods
 			.get_encrypted_sum(currennt_round)
@@ -278,25 +274,160 @@ describe("E2E Batcher setup", () => {
 		encrypted_amount = [encrypted_sum[0], encrypted_sum[1]];
 	});
 
-	it.skip("relayer successfully decrypt and swap the value", async () => {
-		const nonce = Fr.random();
-		const output = await batcher.methods
-			.execute_batch(
-				encrypted_amount,
-				HE_PRIVATE_KEY,
-				0,
-				eth.address,
-				dai.address,
-				nonce,
-				nonce
-			)
+	it("relayer successfully decrypt and execute swap", async () => {
+		const currennt_round = await batcher.methods.get_round().simulate();
+		const encrypted_sum = await batcher.methods
+			.get_encrypted_sum(currennt_round)
 			.simulate();
 
-		console.log("output: ", output);
-		// TODO: both/either addition and decryption goes wrong here.
-		// expected: 500000
-		// output: 40000000000 ( userA input * userB input )
-		// possibly need BigInt lib
+		// ---  decryption  --- //
+
+		const encryptedValueSumC1_0 = {
+			x: encrypted_sum[0],
+			y: encrypted_sum[1],
+		};
+
+		const encryptedValueSumC2_0 = {
+			x: encrypted_sum[2],
+			y: encrypted_sum[3],
+		};
+
+		const decryptedSum1 = await bjj.elgamalDecrypt(
+			HE_PRIVATE_KEY,
+			encryptedValueSumC1_0,
+			encryptedValueSumC2_0,
+			8
+		);
+
+		console.log("decryptedSum1: ", decryptedSum1);
+
+		const encryptedValueSumC1_1 = {
+			x: encrypted_sum[4],
+			y: encrypted_sum[5],
+		};
+
+		const encryptedValueSumC2_1 = {
+			x: encrypted_sum[6],
+			y: encrypted_sum[7],
+		};
+
+		const decryptedSum2 = await bjj.elgamalDecrypt(
+			HE_PRIVATE_KEY,
+			encryptedValueSumC1_1,
+			encryptedValueSumC2_1,
+			8
+		);
+
+		console.log("decryptedSum2: ", decryptedSum2);
+
+		// convert points to affine points
+		const ciphertext_lower_1 = {
+			point: encryptedValueSumC1_0,
+		};
+
+		const ciphertext_lower_2 = {
+			point: encryptedValueSumC2_0,
+		};
+
+		const ciphertext_upper_1 = {
+			point: encryptedValueSumC1_1,
+		};
+
+		const ciphertext_upper_2 = {
+			point: encryptedValueSumC2_1,
+		};
+
+		const secret = Fr.random();
+		const secretHash = computeMessageSecretHash(secret);
+
+		const batcher_token_out_before = await dai.methods
+			.balance_of_private(batcher.address)
+			.simulate();
+
+		console.log("batcher_token_out_before: ", batcher_token_out_before);
+
+		const amm_token_in_before = await eth.methods
+			.balance_of_public(amm.address)
+			.simulate();
+
+		console.log("amm_token_in_before: ", amm_token_in_before);
+
+		const nonceForDAIApproval = new Fr(1n);
+		await admin_relayer.createAuthWit({
+			caller: amm.address,
+			action: dai.methods.unshield(
+				batcher.address,
+				amm.address,
+				5e16,
+				nonceForDAIApproval
+			),
+		});
+
+		const tx = await batcher.methods
+			.execute_batch(
+				decryptedSum1,
+				decryptedSum2,
+				ciphertext_lower_1,
+				ciphertext_lower_2,
+				ciphertext_upper_1,
+				ciphertext_upper_2,
+				HE_PRIVATE_KEY,
+				0, // token_out_amount_cancelled
+				0, // nonce0
+				0, // nonce1
+				secretHash
+			)
+			.send()
+			.wait();
+
+		// batcher_token_out_after
+		const batcher_token_out_after = await dai.methods
+			.balance_of_private(batcher.address)
+			.simulate();
+
+		console.log("batcher_token_out_after: ", batcher_token_out_after);
+		expect(batcher_token_out_after).toBe(0n);
+
+		// amm_token_out_after
+		const amm_token_out_after = await dai.methods
+			.balance_of_public(amm.address)
+			.simulate();
+
+		console.log("amm_token_out_after: ", amm_token_out_after);
+		expect(amm_token_out_after).toBe(batcher_token_out_before);
+
+		const expected_token_in = BigInt(5e16);
+
+		// redeem eth shielded from amm
+		await addPendingShieldNoteToPXE(
+			batcher.address,
+			eth.address,
+			expected_token_in,
+			secretHash,
+			tx.txHash
+		);
+
+		await eth
+			.withWallet(admin_relayer)
+			.methods.redeem_shield(batcher.address, expected_token_in, secret)
+			.send()
+			.wait();
+
+		// batcher_token_in_after
+		const batcher_token_in_after = await eth.methods
+			.balance_of_private(batcher.address)
+			.simulate();
+
+		console.log("batcher_token_in_after: ", batcher_token_in_after);
+		expect(batcher_token_in_after).toBe(expected_token_in);
+
+		// amm_token_in_after
+		const amm_token_in_after = await eth.methods
+			.balance_of_public(amm.address)
+			.simulate();
+
+		console.log("amm_token_in_after: ", amm_token_in_after);
+		expect(amm_token_in_after).toBe(amm_token_in_before - expected_token_in);
 	});
 
 	// 1: decrypt & swap

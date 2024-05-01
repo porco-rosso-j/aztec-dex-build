@@ -44,20 +44,14 @@ export const deployTokensAndMint = async (
 		.deployed();
 
 	// mint eth to admin
-	await ethContract.methods
-		.mint_public(admin_relayer, 10_000_000)
-		.send()
-		.wait();
+	await ethContract.methods.mint_public(admin_relayer, 10e18).send().wait();
 
 	// mint dai to relayer for bonding
-	await daiContract.methods
-		.mint_public(admin_relayer, 100_000_000)
-		.send()
-		.wait();
+	await daiContract.methods.mint_public(admin_relayer, 10e18).send().wait();
 
 	// mint dai to userA for deposit
 	// await daiContract.methods.mint_public(userA, 100_000_000).send().wait();
-	const mint_amount = 100_000_000n;
+	const mint_amount = BigInt(100e18);
 
 	const secretA = Fr.random();
 	const secretHashA = computeMessageSecretHash(secretA);
@@ -132,7 +126,7 @@ export const deployAMMMock = async (
 				action: token_in.methods.transfer_public(
 					admin_relayer,
 					ammMockContract.address,
-					100_000,
+					1e18,
 					nonce
 				),
 			},
@@ -143,7 +137,7 @@ export const deployAMMMock = async (
 
 	// deployer add liquidity
 	await ammMockContract.methods
-		.add_liquidity(token_in.address, 100_000, nonce)
+		.add_liquidity(token_in.address, 1e18, nonce)
 		.send()
 		.wait();
 

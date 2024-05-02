@@ -13,7 +13,6 @@ import {
 } from "@aztec/aztec.js/deployment";
 import { SchnorrAccountContractArtifact } from "@aztec/accounts/schnorr";
 import { TokenContract } from "@aztec/noir-contracts.js";
-// import { BatcherVaultContract } from "../artifacts/BatcherVault.js";
 import { AMMMockContract } from "../artifacts/AMMMock.js";
 import { addPendingShieldNoteToPXE } from "./addNote.js";
 

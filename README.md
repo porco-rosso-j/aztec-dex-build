@@ -1,6 +1,6 @@
 # Batcher Contract on Aztec
 
-The `BatcherVault` contract allows users to obfuscate their swap amounts when they trade on AMMs. It leverages an additive homomorphic encryption scheme to encrypt and aggregate users' input amounts without revealing individual amounts. The encrypted total amount is decrypted by a relayer who executes a batched swap.
+The `BatcherVault` contract allows users to obfuscate their swap amounts when they trade on AMMs. It leverages an additive homomorphic encryption scheme to encrypt and aggregate users' input amounts without revealing individual amounts. The encrypted total amount is decrypted by a relayer who executes a batched swap. Later, users can claim their share of the output amount calculated based on their pro-rata share of the input amount in a batch.
 
 This vault doesn't only help conceal the users' input amount but also hide the sender address and output amount throughout the deposit and claim processes, because token transfer in both deposits and claims is performed privately without revealing `msg_sender`. The only visible information is "when" each deposit is made, as each deposit execution invokes public methods internally.
 
@@ -26,9 +26,9 @@ A relayer needs to stake a bonding token to the contract at deployment. This sta
 
 Another approach that is more preferable but challenging is to implement a threshold decryption scheme like Penumbra's. It generates, splits, and distributes the decryption key to multiple parties through the DKG procedure, allowing for decryption without nobody knowing the entire key.
 
-Theoretically, it seems quite feasible to implement such a scheme for this batcher vault by having [a Penumbra-like threshold decryption logic](https://github.com/penumbra-zone/penumbra/tree/main/crates/crypto/eddy) in Noir with baby-jub-jub-based [FROAST](https://github.com/ZcashFoundation/frost) as the key generation algorithm.
+Theoretically, it seems quite feasible to implement such a scheme for this batcher vault by having [a Penumbra-like threshold decryption logic](https://github.com/penumbra-zone/penumbra/tree/main/crates/crypto/eddy) in Noir with baby-jub-jub-based [Frost](https://github.com/ZcashFoundation/frost) as the key generation algorithm.
 
-This could be our future improvement task and the primary reason why we decided to build this feature with the Elgamal homomorphic addition instead of a note-sharing scheme in which individual input amounts must be revealed to a relayer.
+This could be our future improvement task and the primary reason why we decided to build this feature with the Elgamal homomorphic addition instead of a note-sharing scheme in which individual input amounts can also be hidden to the external world but the relayer.
 
 ### 2. The Upper Limit of Input Amount
 

@@ -4,24 +4,25 @@ mod types;
 
 // aztec-cli codegen ./target/ -o ../../test/artifacts --ts
 
+/// This contract allows users to obfuscate their swap amounts when they trade on AMMs. 
+/// It leverages an additive homomorphic encryption scheme to encrypt and 
+/// aggregate users' input amounts without revealing individual amounts. 
+/// The encrypted total amount is decrypted by a relayer who executes a batched swap.
+
 contract BatcherVault {
-    use dep::aztec::prelude::{
-        AztecAddress, EthAddress, FunctionSelector, NoteHeader, NoteGetterOptions, NoteViewerOptions,
-        Map, PublicMutable, PublicImmutable, PrivateMutable, SharedImmutable
+    use dep::aztec::{
+        prelude::{
+        AztecAddress, FunctionSelector, Map, PublicMutable, PublicImmutable, PrivateMutable, SharedImmutable
+        },
+        context::Context,
     };
-    use dep::aztec::{note::note_getter_options::Comparator, 
-        context::{Context, PrivateContext, PublicContext, gas::GasOpts}
-    };
+    use dep::authwit::auth::{IS_VALID_SELECTOR, compute_call_authwit_hash, compute_outer_authwit_hash};
 
-    use dep::authwit::auth::{
-        IS_VALID_SELECTOR, assert_current_call_valid_authwit_public, compute_call_authwit_hash,
-        compute_outer_authwit_hash
-    };
-
+    // libs
     use dep::noir_elgamal;
     use dep::std::ec::tecurve::affine::Point;
 
-    // note
+    // notes
     use crate::deposit_note::{DepositNote, DEPOSIT_NOTE_LEN};
     use crate::auth_action_note::{AuthActionNote, AUTH_ACTION_NOTE_LEN};
 
@@ -41,10 +42,10 @@ contract BatcherVault {
         token_out: SharedImmutable<AztecAddress>, // token sold e.g. dai
         token_in: SharedImmutable<AztecAddress>, // token purchased e.g. eth
         current_round: PublicMutable<Field>,
-        batch_relayer: PublicMutable<BatchRelayer>,
-        rounds: Map<Field, PublicMutable<Round>>,
-        deposit_notes: Map<AztecAddress, PrivateMutable<DepositNote>>, 
-        auth_actions: Map<Field, PrivateMutable<AuthActionNote>>,   
+        batch_relayer: PublicMutable<BatchRelayer>, // relayer's config
+        rounds: Map<Field, PublicMutable<Round>>, // the mapping of storing token amount data for each round
+        deposit_notes: Map<AztecAddress, PrivateMutable<DepositNote>>, // note of users' input amount
+        auth_actions: Map<Field, PrivateMutable<AuthActionNote>>, // store private approved action
     }
 
     impl Storage {
@@ -71,6 +72,10 @@ contract BatcherVault {
         }
       }
     }
+
+    /************************************************************************
+     * Initialization Functions
+     ************************************************************************/
 
     #[aztec(private)]
     #[aztec(initializer)]
@@ -109,9 +114,8 @@ contract BatcherVault {
         storage.current_round.write(1);
     }
 
-    // have separate init func for initializing relayer states
+    // Note: have separate init func for initializing relayer states
     // due to  (JSON-RPC PROPAGATED) Array size exceeds target length for deployment
-    // should only be called by relayer if admin & relayer are separate 
     #[aztec(private)]
     fn init_relayer(
         relayer: AztecAddress,
@@ -128,7 +132,7 @@ contract BatcherVault {
         assert(sk_hash == computed_sk_hash, "invalid sk_hash");
      
         // TODO: Check he_secret_key corresponds to he_pub_key in bbj
-        // https://github.com/jat9292/babyjubjub-utils/blob/f93b474f35a302543b9f703b00c4e0628b5b88a7/index.js#L87
+        // assert(he_pub_key == noir_elgamal::priv_to_pub_key(he_secret_key))
 
         context.call_public_function(
             context.this_address(),
@@ -153,11 +157,12 @@ contract BatcherVault {
                 relayer.to_field(),
                 bonding_token.to_field(),
                 bonding_amount,
-                nonce // ?
+                nonce
             ]
         );
     }
 
+    // store relayer's config in BatchRelayer struct
     #[aztec(public)]
     fn _init_relayer(
         relayer: AztecAddress,
@@ -174,7 +179,7 @@ contract BatcherVault {
         let he_pub_key_affine = AffinePoint::new(point);
         assert(noir_elgamal::is_valid_subgroup(he_pub_key_affine.point), "Invalid public key");
 
-        // relayer provides batch_relayer states
+        // init BatchRelayer
         let batch_relayer = BatchRelayer::new(
             relayer,
             bonding_token,
@@ -185,11 +190,12 @@ contract BatcherVault {
             0, // timestamp
             interval
         );
-        storage.batch_relayer.write(batch_relayer);
 
-        // TODO: maybe perform stake too here
+        storage.batch_relayer.write(batch_relayer);
     }
 
+    // Another init method to avoid the same error `Array size exceeds target length`
+    // Initialize encrypted note with zero values
     #[aztec(public)]
     fn init_encrypted_note(rand: Field) {
         let batch_relayer = storage.batch_relayer.read();
@@ -208,39 +214,30 @@ contract BatcherVault {
     }
 
     /************************************************************************
-     * Admin's Operations
+     * Users' Operations : Deposit, Cancel, and Claim
      ************************************************************************/
 
-     // TODO:
-     // set_relayer(): set a new relayer
-     // set_relayer_params: set new relayer params, e.g. bonding_token, bonding_amount, etc...
-
-
-    /************************************************************************
-     * Users' Operations : Deposit, Withdraw, and Claim
-     ************************************************************************/
-
-    // TODO: some checks if relayer has already made a deposit before users depositing
-    // todo: init round after incrementing round 
+    // This method lets users to make swap request by depositing their funds,
+    // calling another public function to store the encrypted amount 
     #[aztec(private)]
     fn deposit_to_batch(
         current_round: Field,
         amount_out: Field, 
         relayer_he_pubkey: AffinePoint,
-        // rand: Field,
         rands: [Field;2],
         nonce: Field
     ) {
         // TODO: validate current_round
         let sender = context.msg_sender();
-        // let mut deposit_note = DepositNote::empty();
 
+        // initialize deposit_note
         let mut deposit_note = DepositNote::new(current_round, amount_out, sender);
         storage.deposit_notes.at(sender).initialize(
             &mut deposit_note,
             true
         );
 
+        // transfer user's fund to this contract
         let asset = storage.token_out.read_private();
         Token::at(asset).transfer(
             &mut context,
@@ -254,18 +251,21 @@ contract BatcherVault {
         let lower = (amount_out as u64 & 0xFFFFFFFF) as u32; // lower
         let upper = (amount_out as u64 >> 32) as u32; // upper
 
+        // encrypt lower
         let (c1_0, c2_0) = noir_elgamal::exp_elgamal_encrypt(
                relayer_he_pubkey.point, 
                lower,
                rands[0]
         );
 
+        // encrypt upper
        let (c1_1, c2_1) = noir_elgamal::exp_elgamal_encrypt(
                relayer_he_pubkey.point, 
                upper,
                rands[1]
         );
-        
+
+         // call _add_token_out_amount() to store the encrypted amount
         context.call_public_function(
             context.this_address(),
             FunctionSelector::from_signature("_add_token_out_amount([Field;2],[Field;2],[Field;2],[Field;2])"),
@@ -281,7 +281,41 @@ contract BatcherVault {
             ]
         );
     }
+    
+    // called by deposit_to_batch()
+    // store encrypted deposit amount in the current round of rounds mapping
+    #[aztec(public)]
+    #[aztec(internal)]
+    fn _add_token_out_amount(
+        c1_0: [Field;2], 
+        c2_0: [Field;2],
+        c1_1: [Field;2], 
+        c2_1: [Field;2]
+    ) {
+        let current_round = storage.current_round.read();
+        let mut round = storage.rounds.at(current_round).read();
 
+        let encrypted_value_to_add_0 = ElgamalAffinePoints::new(
+            AffinePoint::deserialize(c1_0),
+            AffinePoint::deserialize(c2_0)
+        );
+
+        let encrypted_value_to_add_1 = ElgamalAffinePoints::new(
+            AffinePoint::deserialize(c1_1),
+            AffinePoint::deserialize(c2_1)
+        );
+
+        let current_encrypted_sum = round.encrypted_token_out_amount;
+        let new_encrypted_sum_0 = current_encrypted_sum.limb0.add(encrypted_value_to_add_0);
+        let new_encrypted_sum_1 = current_encrypted_sum.limb1.add(encrypted_value_to_add_1);
+
+        round.encrypted_token_out_amount.limb0 = new_encrypted_sum_0;
+        round.encrypted_token_out_amount.limb1 = new_encrypted_sum_1;
+
+        storage.rounds.at(current_round).write(round);
+    }
+
+    // This method lets users cancel their swap request and send the deposit back to the user
     // TODO: this func or another func should let users withdraw in the case of relayer failure
     // partial removal be a bit tricker but complete cancelling might be quite easy to implement
     #[aztec(private)]
@@ -314,7 +348,18 @@ contract BatcherVault {
         storage.deposit_notes.at(context.msg_sender()).replace(&mut empty_deposit_note, true);
     }
 
-    // from user
+    /// "decrease" (increase) `token_out_amount_cancelled` in rounds
+    #[aztec(public)]
+    #[aztec(internal)]
+    fn _sub_token_out_amount(amount: Field, _round: Field) {
+        let mut round = storage.rounds.at(_round).read();
+        round.token_out_amount_cancelled = amount;
+        storage.rounds.at(_round).write(round);
+    }
+
+    // This method lets users claim their share of the output amount 
+    // calculated based on their pro-rata share of the input amount in a batch. 
+    // claim_amount is calculated like "total_token_in * amount_out / total_token_out"
     #[aztec(private)]
     fn claim_token_in(
         round: Field, 
@@ -323,9 +368,10 @@ contract BatcherVault {
         token_out_amount_cancelled: Field
     ) {
         let sender = context.msg_sender();
+        // fetch user's deposit_ note
         let mut deposit_note = storage.deposit_notes.at(sender).get_note(false);
-        // let mut deposit_note = storage.deposit_notes.at(sender).get_note(true);
 
+        // validate params
         context.call_public_function(
             context.this_address(),
             FunctionSelector::from_signature("_validate_claim_params(Field,Field,Field,Field)"), 
@@ -367,11 +413,13 @@ contract BatcherVault {
     }
 
     /************************************************************************
-     * Relayer's Public Operations
+     * Relayer's Operations | Execute Batch, Finalize Batch, and Dispute
      ************************************************************************/
 
-    // from relayer or amind controlled by L1 contract with timestamp checkers
-    // minimum_output_amount should be calculated based on target twap
+    // This method lets relayer execute a batch for a certain round.
+    // 1: decrypts splitted encrypted deposit amounts and combine them
+    // 2: approves the AMM contract for unshielding funds from this contract
+    // 3: calls swap function on AMM contract
     #[aztec(private)]
     fn execute_batch(
         plaintext_lower: Field,
@@ -446,6 +494,7 @@ contract BatcherVault {
             true
         );
 
+        // call `swap_private` on the mock AMM contract
         context.call_private_function(
             storage.target.read_private(),
             FunctionSelector::from_signature("swap_private(Field,Field,Field,Field,Field)"), 
@@ -471,6 +520,7 @@ contract BatcherVault {
             inner_hash
         );
         
+        // get boolean value for an action stored in note
         let auth_action = storage.auth_actions.at(message_hash).get_note(false);
         
         if (auth_action.approved) {
@@ -481,10 +531,8 @@ contract BatcherVault {
         }
     }
 
-    // TODO: this func can have conditions to be executed 
-    // 1: total deposit count: how many deposits are made so far
-    // 2: time: how long did it take since last batch execute
-    //    how abotu create relayer field "min_batch" amount?
+    // called by `execute_batch()`
+    // validate params and store necessary in public context 
     #[aztec(public)]
     #[aztec(internal)]
     fn validate_execute_batch(
@@ -514,7 +562,8 @@ contract BatcherVault {
         storage.rounds.at(current_round).write(round);
     }
 
-    // here relayer redeem pending shield and update the acquired eth amount
+    // This method is called right after `execute_batch()` to finialize the batch execution.
+    // it lets the relayer redeem pending shield and update the acquired eth amount
     // of the latest round after eth purchase at the `batch_execute()`
     #[aztec(private)]
     fn finalize_execute(
@@ -532,6 +581,8 @@ contract BatcherVault {
         );  
     }
 
+    // called internally from `finalize_execute()`
+    // validate params and store necessary in public context 
     #[aztec(public)]
     #[aztec(internal)]
     fn _finalize_execute(token_in_amount: Field) {
@@ -554,8 +605,8 @@ contract BatcherVault {
      * Functions for Relayer Dispute
      ************************************************************************/
 
-    // slash or takeover
-
+    // This method lets caller slash the existing relayer and optionally take over the relayer role.
+    // caller should provide the correct `he_secret_key`
     #[aztec(private)]
     fn dispute_relayer(
         he_secret_key: Field, 
@@ -566,8 +617,8 @@ contract BatcherVault {
         new_relayer: AztecAddress,
         only_slash: bool
         ) {
-        let sk_hash = dep::std::hash::pedersen_hash([he_secret_key]);
 
+        let sk_hash = dep::std::hash::pedersen_hash([he_secret_key]);
         context.call_public_function(
             context.this_address(),
             FunctionSelector::from_signature("check_sk_hash(Field)"),
@@ -587,7 +638,7 @@ contract BatcherVault {
            assert(new_sk_hash == new_computed_sk_hash, "invalid_new_sk_hash");
         
            // TODO: Check new_he_secret_key corresponds to new_he_pub_key in bbj
-           // https://github.com/jat9292/babyjubjub-utils/blob/f93b474f35a302543b9f703b00c4e0628b5b88a7/index.js#L87
+           // assert(he_pub_key == noir_elgamal::priv_to_pub_key(he_secret_key))
 
            context.call_public_function(
                context.this_address(),
@@ -620,7 +671,6 @@ contract BatcherVault {
         );
     }
 
-    // replace_relayer
     #[aztec(public)]
     #[aztec(internal)]
     fn replace_relayer(
@@ -633,10 +683,13 @@ contract BatcherVault {
         let mut relayer = storage.batch_relayer.read();
         relayer.relayer = new_relayer;
         relayer.sk_hash = sk_hash;
+        // store new pub key 
         relayer.he_pub_key = AffinePoint::new(Point::new(new_he_pub_key_x, new_he_pub_key_y));
         storage.batch_relayer.write(relayer); 
     }
 
+    // called by relayer_init func
+    // transfer relayer's fund to this contract
     #[aztec(public)] 
     #[aztec(internal)] 
     fn _stake_bonding(relayer: AztecAddress, token:AztecAddress, amount:Field, nonce:Field) {
@@ -666,55 +719,9 @@ contract BatcherVault {
         );
     }
 
-
     #[aztec(public)]
     fn check_sk_hash(sk_hash: Field) {
         assert(sk_hash == storage.batch_relayer.read().sk_hash, "invalid sk_hash");
-    }
-
-
-    /************************************************************************
-     * Public Internal Function
-     ************************************************************************/
-
-    #[aztec(public)]
-    #[aztec(internal)]
-    fn _add_token_out_amount(
-        c1_0: [Field;2], 
-        c2_0: [Field;2],
-        c1_1: [Field;2], 
-        c2_1: [Field;2]
-    ) {
-        let current_round = storage.current_round.read();
-        let mut round = storage.rounds.at(current_round).read();
-
-        let encrypted_value_to_add_0 = ElgamalAffinePoints::new(
-            AffinePoint::deserialize(c1_0),
-            AffinePoint::deserialize(c2_0)
-        );
-
-        let encrypted_value_to_add_1 = ElgamalAffinePoints::new(
-            AffinePoint::deserialize(c1_1),
-            AffinePoint::deserialize(c2_1)
-        );
-
-        let current_encrypted_sum = round.encrypted_token_out_amount;
-        let new_encrypted_sum_0 = current_encrypted_sum.limb0.add(encrypted_value_to_add_0);
-        let new_encrypted_sum_1 = current_encrypted_sum.limb1.add(encrypted_value_to_add_1);
-
-        round.encrypted_token_out_amount.limb0 = new_encrypted_sum_0;
-        round.encrypted_token_out_amount.limb1 = new_encrypted_sum_1;
-
-        storage.rounds.at(current_round).write(round);
-    }
-
-    /// "decrease" (increase) `token_out_amount_cancelled` in rounds
-    #[aztec(public)]
-    #[aztec(internal)]
-    fn _sub_token_out_amount(amount: Field, _round: Field) {
-        let mut round = storage.rounds.at(_round).read();
-        round.token_out_amount_cancelled = amount;
-        storage.rounds.at(_round).write(round);
     }
 
     #[aztec(public)]
@@ -723,6 +730,10 @@ contract BatcherVault {
         let current_round = storage.current_round.read();
         assert(current_round == round, "invalid_round");
     }
+
+    /************************************************************************
+     * Unconstrained Functions
+     ************************************************************************/
 
     unconstrained fn get_admin() -> pub Field {
         storage.admin.read().to_field()
@@ -768,6 +779,10 @@ contract BatcherVault {
     unconstrained fn get_sk_hash(he_secret_key: Field) -> pub Field {
         dep::std::hash::pedersen_hash([he_secret_key])
     }
+
+    /************************************************************************
+     * For testing 
+     ************************************************************************/
 
     #[test]
     fn test_get_sk_hash() {

@@ -5,7 +5,7 @@ use crate::types::encrypted_sum::EncryptedSum;
 global ROUND_SERIALIZED_LEN: Field = 14;
 
 struct Round {
-    token_in_amount: Field,
+    token_in_amount: Field, 
     expected_min_token_in: Field,
     token_out_amount_cancelled: Field,
     token_out_amount: Field,

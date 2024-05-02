@@ -46,6 +46,8 @@ let amm: AMMMockContract;
 
 const TIMEOUT = 300_000;
 
+// yarn test batcher.test.ts
+
 beforeAll(async () => {
 	pxe = createPXEClient(SANDBOX_URL);
 
@@ -513,7 +515,7 @@ describe("E2E Batcher setup", () => {
 				NEW_HE_PUBKEY.y,
 				NEW_HE_PRIVATE_KEY,
 				userA.getAddress(),
-				false // only_slash
+				false // only_slash?
 			)
 			.send()
 			.wait();

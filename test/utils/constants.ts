@@ -3,7 +3,8 @@ import { AztecAddress } from "@aztec/aztec.js";
 export const SANDBOX_URL = "http://localhost:8080";
 export const ADDRESS_ZERO = AztecAddress.fromBigInt(0n);
 
-export const BONDING_AMOUNT = 1_000_000n;
+export const BONDING_AMOUNT = BigInt(1e10);
+export const SLASH_AMOUNT = BigInt(1e10);
 export const INTERVAL = 86400n;
 
 /// ----- BBJ Constants ------ ////
@@ -30,3 +31,6 @@ export const RANDOMNESS_USER_2 =
 	1048079536491508724972388093791272936112538204421938605612284921668780878715n;
 
 export const U64_MAX = 18446744073700000000;
+
+export const NEW_HE_PRIVATE_KEY =
+	2291123624948246627368989940774052753470489062495018070576418670157516550852n;

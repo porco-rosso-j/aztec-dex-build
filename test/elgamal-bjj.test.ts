@@ -1,6 +1,7 @@
 import { Fr } from "@aztec/aztec.js";
 import { it } from "@jest/globals";
 import * as bjj from "babyjubjub-utils";
+import { HE_PRIVATE_KEY, NEW_HE_PRIVATE_KEY } from "./utils/constants.js";
 
 it.skip("test", async () => {
 	const generatedKeys = await bjj.generatePrivateAndPublicKey();
@@ -47,7 +48,7 @@ it.skip("test", async () => {
 	// assert.equal(decryptedSum, original_plaint_text1 + original_plaint_text2); // we recover the sum of orginal plaintexts
 }, 360000);
 
-it("test 2", async () => {
+it.skip("test 2", async () => {
 	const privateKey = BigInt(
 		"2360067582289791756090345803415031600606727745697750731963540090262281758098"
 	);
@@ -111,3 +112,8 @@ it("test 2", async () => {
 
 	console.log("decryptedSum2: ", decryptedSum2);
 }, 360000);
+
+it("get pubkey from sk", async () => {
+	const NEW_HE_PUBKEY = await bjj.privateToPublicKey(NEW_HE_PRIVATE_KEY);
+	console.log("NEW_HE_PUBKEY: ", NEW_HE_PUBKEY);
+});

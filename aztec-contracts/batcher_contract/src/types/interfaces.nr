@@ -72,18 +72,32 @@ impl Token {
         );
     }
 
-    // pub fn balance_of_public(
+    pub fn redeem_shield(
+        self: Self,
+        context: &mut PrivateContext,
+        to: AztecAddress,
+        amount: Field,
+        secret: Field
+    ) {
+        context.call_private_function(
+            self.address,
+            FunctionSelector::from_signature("redeem_shield((Field),Field,Field)"),
+            [to.to_field(), amount, secret]
+        );
+    }
+
+    // pub fn balance_of_private(
     //     self: Self,
-    //     context: &mut PublicContext,
+    //     context: &mut PrivateContext,
     //     owner: AztecAddress
     // ) -> Field {
-    //     let _ret = context.call_public_function(
+    //     let _ret = context.call_private_function(
     //         self.address,
     //         FunctionSelector::from_signature("balance_of_public((Field))"),
-    //         [owner.to_field()],
-    //          GasOpts::default()
+    //         [owner.to_field()]
     //     );
-    //     _ret[0]
+    //     let ret = _ret.unpack();
+    //     ret[0]
     // }
 }
 

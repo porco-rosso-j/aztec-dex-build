@@ -2,7 +2,6 @@ import {
 	Fr,
 	PXE,
 	createPXEClient,
-	AztecAddress,
 	AccountWalletWithPrivateKey,
 	initAztecJs,
 	GrumpkinScalar,
@@ -20,14 +19,15 @@ import {
 	publicDeployAccounts,
 } from "./utils/deploy.js";
 import {
-	ADDRESS_ZERO,
 	BONDING_AMOUNT,
 	HE_PRIVATE_KEY,
 	HE_PUBLIC_KEY,
 	INTERVAL,
+	NEW_HE_PRIVATE_KEY,
 	RAND_INIT,
 	SANDBOX_URL,
 	SK_HASH,
+	SLASH_AMOUNT,
 } from "./utils/constants.js";
 import { computePartialAddress } from "@aztec/circuits.js";
 import * as bjj from "babyjubjub-utils";
@@ -43,8 +43,6 @@ let userB: AccountWalletWithPrivateKey;
 let eth: TokenContract;
 let dai: TokenContract;
 let amm: AMMMockContract;
-
-let encrypted_amount: Fr[];
 
 const TIMEOUT = 300_000;
 
@@ -91,7 +89,7 @@ describe("E2E Batcher setup", () => {
 		const batcherContractDeployment = BatcherVaultContract.deployWithPublicKey(
 			publicKey,
 			admin_relayer, // deployer
-			admin_relayer.getAddress(), //admin
+			admin_relayer.getAddress(), // admin
 			amm.address, // target
 			eth.address, // token_in
 			dai.address // token_out
@@ -106,19 +104,44 @@ describe("E2E Batcher setup", () => {
 		batcher = await batcherContractDeployment.send().deployed();
 		console.log("batcher.address: ", batcher.address);
 
+		const nonce = Fr.random();
+		await admin_relayer
+			.setPublicAuthWit(
+				{
+					caller: batcher.address,
+					action: dai.methods.transfer_public(
+						admin_relayer.getAddress(),
+						batcher.address,
+						BONDING_AMOUNT,
+						nonce
+					),
+				},
+				true
+			)
+			.send()
+			.wait();
+
 		await batcher.methods
 			.init_relayer(
 				admin_relayer.getAddress(), // relayer
 				dai.address, // bonding_token
 				BONDING_AMOUNT, // bonding_amount
+				SLASH_AMOUNT,
 				[HE_PUBLIC_KEY.point.x, HE_PUBLIC_KEY.point.y], // he_pub_key
 				SK_HASH, // sk_hash
 				HE_PRIVATE_KEY, // he_secret_key
-				INTERVAL // interval
+				INTERVAL, // interval
+				nonce
 			)
 			.send()
 			.wait();
 		console.log("relayer initialized");
+
+		const balance = await dai.methods
+			.balance_of_public(batcher.address)
+			.simulate();
+		expect(balance).toBe(BONDING_AMOUNT);
+		console.log("balance: ", balance);
 
 		await batcher.methods.init_encrypted_note(RAND_INIT).send().wait();
 		console.log("encrypted_note initialized");
@@ -161,41 +184,10 @@ describe("E2E Batcher setup", () => {
 		console.log("encrypted_sum: ", encrypted_sum);
 	});
 
-	it.skip("relayer successfully deposit bonding", async () => {
-		const nonce = Fr.random(); // nonce for stake (transfer_public)
-		await admin_relayer
-			.setPublicAuthWit(
-				{
-					caller: batcher.address,
-					action: dai.methods.transfer_public(
-						admin_relayer.getAddress(),
-						batcher.address,
-						BONDING_AMOUNT,
-						nonce
-					),
-				},
-				true
-			)
-			.send()
-			.wait();
-
-		await batcher.methods
-			.stake(admin_relayer.getAddress(), dai.address, BONDING_AMOUNT, nonce)
-			.send()
-			.wait();
-
-		const balance = await dai.methods
-			.balance_of_public(batcher.address)
-			.simulate();
-		expect(balance).toBe(BONDING_AMOUNT);
-		console.log("balance: ", balance);
-	});
-
 	it("userA should successfully make deposit to batcher contract", async () => {
 		const rands = [Fr.random(), Fr.random()];
 		const nonce = Fr.random();
 		const currennt_round = await batcher.methods.get_round().simulate();
-		// const deposit_amount = BigInt(4e18);
 		const deposit_amount = BigInt(4e15);
 
 		const action = dai
@@ -271,10 +263,9 @@ describe("E2E Batcher setup", () => {
 			.simulate();
 
 		console.log("encrypted_sum: ", encrypted_sum);
-		encrypted_amount = [encrypted_sum[0], encrypted_sum[1]];
 	});
 
-	it("relayer successfully decrypt and execute swap", async () => {
+	it("relayer successfully decrypt and execute swap on behalf of users", async () => {
 		const currennt_round = await batcher.methods.get_round().simulate();
 		const encrypted_sum = await batcher.methods
 			.get_encrypted_sum(currennt_round)
@@ -380,6 +371,17 @@ describe("E2E Batcher setup", () => {
 			.send()
 			.wait();
 
+		const expected_token_in = BigInt(5e16);
+
+		// add pending shield to pxe
+		await addPendingShieldNoteToPXE(
+			batcher.address,
+			eth.address,
+			expected_token_in,
+			secretHash,
+			tx.txHash
+		);
+
 		// batcher_token_out_after
 		const batcher_token_out_after = await dai.methods
 			.balance_of_private(batcher.address)
@@ -396,20 +398,9 @@ describe("E2E Batcher setup", () => {
 		console.log("amm_token_out_after: ", amm_token_out_after);
 		expect(amm_token_out_after).toBe(batcher_token_out_before);
 
-		const expected_token_in = BigInt(5e16);
-
 		// redeem eth shielded from amm
-		await addPendingShieldNoteToPXE(
-			batcher.address,
-			eth.address,
-			expected_token_in,
-			secretHash,
-			tx.txHash
-		);
-
-		await eth
-			.withWallet(admin_relayer)
-			.methods.redeem_shield(batcher.address, expected_token_in, secret)
+		await batcher.methods
+			.finalize_execute(expected_token_in, secret)
 			.send()
 			.wait();
 
@@ -430,6 +421,109 @@ describe("E2E Batcher setup", () => {
 		expect(amm_token_in_after).toBe(amm_token_in_before - expected_token_in);
 	});
 
-	// 1: decrypt & swap
-	// 2: dispute relayer
+	it("users should successfully claim token_in privately", async () => {
+		const round = 1;
+		const total_token_out = await batcher.methods
+			.get_token_out_total_amount(round)
+			.simulate();
+		const total_token_in = await batcher.methods
+			.get_token_in_total_amount(round)
+			.simulate();
+		const token_out_amount_cancelled = await batcher.methods
+			.get_token_out_amount_cancelled(round)
+			.simulate();
+
+		// ---- User A claim ---- //
+
+		const userA_token_in_amount_before = await eth
+			.withWallet(userA)
+			.methods.balance_of_private(userA.getAddress())
+			.simulate();
+		console.log("userA_token_in_amount_before: ", userA_token_in_amount_before);
+
+		await batcher
+			.withWallet(userA)
+			.methods.claim_token_in(
+				round,
+				total_token_in,
+				total_token_out,
+				token_out_amount_cancelled
+			)
+			.send()
+			.wait();
+
+		const userA_token_in_amount_after = await eth
+			.withWallet(userA)
+			.methods.balance_of_private(userA.getAddress())
+			.simulate();
+		console.log("userA_token_in_amount_after: ", userA_token_in_amount_after);
+
+		expect(userA_token_in_amount_after).toBe(
+			userA_token_in_amount_before + BigInt(4e16)
+		);
+
+		// ---- User B claim ---- //
+
+		const userB_token_in_amount_before = await eth
+			.withWallet(userB)
+			.methods.balance_of_private(userB.getAddress())
+			.simulate();
+		console.log("userB_token_in_amount_before: ", userB_token_in_amount_before);
+
+		await batcher
+			.withWallet(userB)
+			.methods.claim_token_in(
+				round,
+				total_token_in,
+				total_token_out,
+				token_out_amount_cancelled
+			)
+			.send()
+			.wait();
+
+		const userB_token_in_amount_after = await eth
+			.withWallet(userB)
+			.methods.balance_of_private(userB.getAddress())
+			.simulate();
+		console.log("userB_token_in_amount_after: ", userB_token_in_amount_after);
+
+		expect(userB_token_in_amount_after).toBe(
+			userB_token_in_amount_before + BigInt(1e16)
+		);
+	});
+
+	it("non-relayer acc should successfully dispute the relayer and take over the role", async () => {
+		const NEW_SK_HASH = await batcher.methods
+			.get_sk_hash(NEW_HE_PRIVATE_KEY)
+			.simulate();
+		const NEW_HE_PUBKEY = await bjj.privateToPublicKey(NEW_HE_PRIVATE_KEY);
+		console.log("NEW_HE_PUBKEY: ", NEW_HE_PUBKEY);
+
+		const batch_relayer_before = await batcher.methods
+			.get_batch_relayer()
+			.simulate();
+		console.log("batch_relayer_before: ", batch_relayer_before);
+
+		await batcher
+			.withWallet(userA)
+			.methods.dispute_relayer(
+				HE_PRIVATE_KEY,
+				NEW_SK_HASH,
+				NEW_HE_PUBKEY.x,
+				NEW_HE_PUBKEY.y,
+				NEW_HE_PRIVATE_KEY,
+				userA.getAddress(),
+				false // only_slash
+			)
+			.send()
+			.wait();
+
+		const batch_relayer_after = await batcher.methods
+			.get_batch_relayer()
+			.simulate();
+		console.log("batch_relayer_after: ", batch_relayer_after);
+		expect(batch_relayer_after.sk_hash).toBe(NEW_SK_HASH);
+		expect(batch_relayer_after.he_pub_key.point.x).toBe(NEW_HE_PUBKEY.x);
+		expect(batch_relayer_after.he_pub_key.point.y).toBe(NEW_HE_PUBKEY.y);
+	});
 });

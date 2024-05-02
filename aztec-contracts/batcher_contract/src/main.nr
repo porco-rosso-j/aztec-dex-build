@@ -117,10 +117,12 @@ contract BatcherVault {
         relayer: AztecAddress,
         bonding_token: AztecAddress, 
         bonding_amount: Field,
+        slash_amount: Field,
         he_pub_key: [Field;2],
         sk_hash: Field,
         he_secret_key: Field,
-        interval: Field
+        interval: Field,
+        nonce: Field
     ) {
         let computed_sk_hash = dep::std::hash::pedersen_hash([he_secret_key]);
         assert(sk_hash == computed_sk_hash, "invalid sk_hash");
@@ -130,11 +132,12 @@ contract BatcherVault {
 
         context.call_public_function(
             context.this_address(),
-            FunctionSelector::from_signature("_init_relayer((Field),(Field),Field,Field,Field,Field,Field)"), 
+            FunctionSelector::from_signature("_init_relayer((Field),(Field),Field,Field,Field,Field,Field,Field)"), 
             [
                 relayer.to_field(),
                 bonding_token.to_field(),
                 bonding_amount,
+                slash_amount,
                 he_pub_key[0],
                 he_pub_key[1],
                 sk_hash,
@@ -142,6 +145,17 @@ contract BatcherVault {
             ]
         );
 
+        // stake bonding token
+        context.call_public_function(
+            context.this_address(),
+            FunctionSelector::from_signature("_stake_bonding((Field),(Field),Field,Field)"), 
+            [
+                relayer.to_field(),
+                bonding_token.to_field(),
+                bonding_amount,
+                nonce // ?
+            ]
+        );
     }
 
     #[aztec(public)]
@@ -149,6 +163,7 @@ contract BatcherVault {
         relayer: AztecAddress,
         bonding_token: AztecAddress, 
         bonding_amount: Field,
+        slash_amount: Field,
         he_pub_key_x: Field,
         he_pub_key_y: Field,
         sk_hash: Field,
@@ -164,12 +179,14 @@ contract BatcherVault {
             relayer,
             bonding_token,
             bonding_amount,
+            slash_amount,
             he_pub_key_affine,
             sk_hash,
             0, // timestamp
             interval
         );
         storage.batch_relayer.write(batch_relayer);
+
         // TODO: maybe perform stake too here
     }
 
@@ -299,28 +316,54 @@ contract BatcherVault {
 
     // from user
     #[aztec(private)]
-    fn claim_token_in(round: Field, total_token_in:Field, total_token_out: Field) {
-
-        // get msg_sender's note
-        let mut deposit_note = storage.deposit_notes.at(context.msg_sender()).get_note(false);
+    fn claim_token_in(
+        round: Field, 
+        total_token_in: Field, 
+        total_token_out: Field, 
+        token_out_amount_cancelled: Field
+    ) {
+        let sender = context.msg_sender();
+        let mut deposit_note = storage.deposit_notes.at(sender).get_note(false);
+        // let mut deposit_note = storage.deposit_notes.at(sender).get_note(true);
 
         context.call_public_function(
             context.this_address(),
-            FunctionSelector::from_signature("_validate_claim_params(Field[])"), 
-            [deposit_note.round, total_token_in, total_token_out]
+            FunctionSelector::from_signature("_validate_claim_params(Field,Field,Field,Field)"), 
+            [deposit_note.round, total_token_in, total_token_out, token_out_amount_cancelled]
         ); 
 
         // calculate total token_in purchased at a specificed round
-        let token_in_amount = (total_token_in * deposit_note.amount_out / total_token_out);
+        let token_out_amount = total_token_out - token_out_amount_cancelled;
+        let claim_token_in_amount = (total_token_in * deposit_note.amount_out / token_out_amount);
 
-        // individual users can execute private transfer from this address to them with no permission..?
-        let _callStackItem = context.call_private_function(
-            storage.token_out.read_private(),
-            FunctionSelector::from_signature("transfer((Field),(Field),Field,Field)"),
-            [context.this_address().to_field(), context.msg_sender().to_field(), token_in_amount, 0]
+        // individual users make this contract transfer token_in out to them
+        let asset = storage.token_in.read_private();
+        Token::at(asset).transfer(
+            &mut context,
+            context.this_address(),
+            sender,
+            claim_token_in_amount,
+            0
         );
 
-        // TODO: note should be destroyed
+        // "destroy" used deposit note
+        deposit_note.round = 0;
+        deposit_note.amount_out = 0;
+        storage.deposit_notes.at(context.msg_sender()).replace(&mut deposit_note, true);
+    }
+
+    #[aztec(public)] 
+    #[aztec(internal)]
+    fn _validate_claim_params(
+        _round: Field, 
+        _total_token_in: Field,
+        _total_token_out: Field,
+        _token_out_amount_cancelled: Field
+    ) {
+        let round = storage.rounds.at(_round).read();
+        assert(round.token_in_amount == _total_token_in, "invalid _total_token_in");
+        assert(round.token_out_amount == _total_token_out, "invalid _total_token_out");
+        assert(round.token_out_amount_cancelled == _token_out_amount_cancelled, "invalid _token_out_amount_cancelled");
     }
 
     /************************************************************************
@@ -365,21 +408,26 @@ contract BatcherVault {
          assert(point_lower.eq(decrytped_lower), "invalid plaintext_lower");
          assert(point_upper.eq(decrytped_upper), "invalid plaintext_upper");
 
+        // combine lower & upper
         let total_amount = ((plaintext_upper as u64 << 32) as u64 | plaintext_lower as u64) as Field;
+        // subtract cancelled amount
         let amount_out_minus_cancelled = total_amount - token_out_amount_cancelled;
+        // 10x exchange rate for test
+        let expected_token_in = amount_out_minus_cancelled * 10;
 
-        // amount_out
+        // validate params in public func
         context.call_public_function(
             context.this_address(),
-            FunctionSelector::from_signature("validate_execute_batch((Field),Field,Field)"), 
+            FunctionSelector::from_signature("validate_execute_batch((Field),Field,Field,Field)"), 
             [
                 context.msg_sender().to_field(),
                 total_amount, 
-                amount_out_minus_cancelled
+                amount_out_minus_cancelled,
+                expected_token_in
             ]
         );
 
-        // _approve_target_to_unshield
+        // approve amm to unshield token from this contract
         let selector = FunctionSelector::from_signature("unshield((Field),(Field),Field,Field)");
         let target = storage.target.read_private();
         let message_hash = compute_call_authwit_hash(
@@ -398,9 +446,6 @@ contract BatcherVault {
             true
         );
 
-        // / 10x exchange rate for test
-        let expected_token_in = amount_out_minus_cancelled * 10;
-
         context.call_private_function(
             storage.target.read_private(),
             FunctionSelector::from_signature("swap_private(Field,Field,Field,Field,Field)"), 
@@ -415,9 +460,8 @@ contract BatcherVault {
 
         amount_out_minus_cancelled
     }
-
-    // here probably there is need to implement create public auth wit
-    // so that target contract can receive(transfer) token from this cotnract.
+    
+    // for target contract to be able to receive(unshield) token from this cotnract.
     #[aztec(private)]
     fn spend_private_authwit(inner_hash: Field) -> Field {
         let message_hash = compute_outer_authwit_hash(
@@ -440,12 +484,14 @@ contract BatcherVault {
     // TODO: this func can have conditions to be executed 
     // 1: total deposit count: how many deposits are made so far
     // 2: time: how long did it take since last batch execute
+    //    how abotu create relayer field "min_batch" amount?
     #[aztec(public)]
     #[aztec(internal)]
     fn validate_execute_batch(
         sender: AztecAddress, 
         amount_out:Field,
-        amount_out_sub_cancelled:Field
+        amount_out_sub_cancelled:Field,
+        expected_token_in: Field
     ) {
         let relayer = storage.batch_relayer.read();
         let exp_current_time = relayer.last_timestamp + relayer.interval;
@@ -460,125 +506,140 @@ contract BatcherVault {
         assert(amount_out_sub_cancelled == _amount_out_sub_cancelled, "invalid_cancelled_amount_out");
 
         // TODO: validate swap amount or decrypted data against encyrpted ammounts
-        // assert(
-        //     (round.encrypted_token_out_amount[0] == c1)
-        //     & (round.encrypted_token_out_amount[1] == c2), 
-        //     "invalid encrypted amount"
-        // );
 
+        // store data for the round
+        round.expected_min_token_in = expected_token_in;
         round.token_out_amount = amount_out_sub_cancelled;
         round.executed = true;
         storage.rounds.at(current_round).write(round);
     }
 
-    // here anyone can update the acquired eth reward of the latest round after eth purchase
-    // but this should only occur once each round, so...
-    #[aztec(public)]
+    // here relayer redeem pending shield and update the acquired eth amount
+    // of the latest round after eth purchase at the `batch_execute()`
+    #[aztec(private)]
     fn finalize_execute(
-        secret_hash_for_redeeming_minted_notes: Field, // secret hash used to redeem minted notes at a later time. This enables anyone to call this function and mint tokens to a user on their behalf
-        amount: Field,
-        secret_for_L1_to_L2_message_consumption: Field 
+        token_in_amount: Field,
+        secret: Field
     ) {
-       // TODO: assert caller == relayer
-       // TODO: how to query amount...? instead of relayer reporting it
-       //       a way is to query balance in both execute_batch and this func
-       //       while suspend claim between these two actions
-       // or claim just can be done by the first claimer
-       // by storing the secret somewhere...?
-       // wait then nah this is bad as this contract should be receipient
+        // claim pending shield created by target contract
+        let token_in = storage.token_in.read_private();
+        Token::at(token_in).redeem_shield(&mut context, context.this_address(), token_in_amount, secret);
 
+        context.call_public_function(
+            context.this_address(),
+            FunctionSelector::from_signature("_finalize_execute(Field)"), 
+            [token_in_amount]
+        );  
+    }
+
+    #[aztec(public)]
+    #[aztec(internal)]
+    fn _finalize_execute(token_in_amount: Field) {
         let current_round = storage.current_round.read();
         let mut round = storage.rounds.at(current_round).read();
         assert(round.executed, "batch tx hasn't been executed");
-        assert(round.token_in_amount == 0, "already claimed");
+        assert(!round.claimed, "pending shield for this round has already been claimed");
+        assert(U128::from_field(token_in_amount) >= U128::from_field(round.expected_min_token_in), "insufficient token_in_amount");
 
-        // store the new balance 
-        round.token_in_amount = amount;
+         // store token_in_amount
+        round.token_in_amount = token_in_amount;
+        round.claimed = true;
         storage.rounds.at(current_round).write(round);
-        
 
-        // claim_private ( mint_private() )
-        // redeem_shield()
-
-        let new_round = storage.current_round.read() + 1;
-        storage.current_round.write(new_round); 
+        // increment round count
+        storage.current_round.write(current_round + 1);
     }
 
     /************************************************************************
      * Functions for Relayer Dispute
      ************************************************************************/
 
+    // slash or takeover
+
     #[aztec(private)]
-    fn dipute_relayer(
+    fn dispute_relayer(
         he_secret_key: Field, 
         new_sk_hash: Field, 
-        new_he_pub_key:Field,
+        new_he_pub_key_x: Field,
+        new_he_pub_key_y: Field,
         new_he_secret_key: Field,
         new_relayer: AztecAddress,
-        secret_hash: Field,
-        nonce:Field
+        only_slash: bool
         ) {
         let sk_hash = dep::std::hash::pedersen_hash([he_secret_key]);
 
         context.call_public_function(
             context.this_address(),
-            FunctionSelector::from_signature("check_sk_hash(Field)"), // or (Field)[]
+            FunctionSelector::from_signature("check_sk_hash(Field)"),
             [sk_hash]
         ); 
 
-        // validate that new_sk_hash == hash(new_he_secret_key);
-        let new_computed_sk_hash = dep::std::hash::pedersen_hash([new_he_secret_key]);
-        assert(new_sk_hash == new_computed_sk_hash, "invalid_new_sk_hash");
+        if (only_slash) {
+            context.call_public_function(
+               context.this_address(),
+               FunctionSelector::from_signature("slash((Field))"),
+               [context.msg_sender().to_field()]
+            );   
+        } else {
+           
+           // validate that new_sk_hash == hash(new_he_secret_key);
+           let new_computed_sk_hash = dep::std::hash::pedersen_hash([new_he_secret_key]);
+           assert(new_sk_hash == new_computed_sk_hash, "invalid_new_sk_hash");
         
-        // TODO: Check new_he_secret_key corresponds to new_he_pub_key in bbj
-        // https://github.com/jat9292/babyjubjub-utils/blob/f93b474f35a302543b9f703b00c4e0628b5b88a7/index.js#L87
+           // TODO: Check new_he_secret_key corresponds to new_he_pub_key in bbj
+           // https://github.com/jat9292/babyjubjub-utils/blob/f93b474f35a302543b9f703b00c4e0628b5b88a7/index.js#L87
 
-        context.call_public_function(
-            context.this_address(),
-            FunctionSelector::from_signature("replace_relayer_and_slash_stake(Field,Field,(Field),Field,Field)"),
-            [new_sk_hash, new_he_pub_key, new_relayer.to_field(), secret_hash, nonce]
-        ); 
+           context.call_public_function(
+               context.this_address(),
+               FunctionSelector::from_signature("replace_relayer(Field,Field,Field,(Field))"),
+               [
+                   new_sk_hash, 
+                   new_he_pub_key_x,
+                   new_he_pub_key_y,
+                   new_relayer.to_field()
+               ]
+           ); 
+        }
+
+
     }
 
-    #[aztec(public)]
-    fn check_sk_hash(sk_hash: Field) {
-        assert(sk_hash == storage.batch_relayer.read().sk_hash, "invalid sk_hash");
-    }
-
-    // replace_relayer_and_slash_stake
-    // 1: replace current relayer with a new relayer
-    // 2: slash bond token
-    // 3: make a new stake deposit from a new layer
     #[aztec(public)]
     #[aztec(internal)]
-    fn replace_relayer_and_slash_stake(sk_hash: Field, new_he_pub_key: AffinePoint, new_relayer:AztecAddress, secret_hash:Field, nonce:Field) {
+    fn slash(recipient: AztecAddress) {
+        // replacement from slashed relayer to a new relayer ( disputer )
+        let relayer = storage.batch_relayer.read();
+
+        // slash by shielding staked asset to new relayer
+        Token::at(relayer.bonding_token).transfer_public(
+            &mut context, 
+            context.this_address(), 
+            recipient,
+            relayer.slash_amount,
+            0
+        );
+    }
+
+    // replace_relayer
+    #[aztec(public)]
+    #[aztec(internal)]
+    fn replace_relayer(
+        sk_hash: Field, 
+        new_he_pub_key_x: Field, 
+        new_he_pub_key_y: Field,
+        new_relayer: AztecAddress,
+    ) {
         // replacement from slashed relayer to a new relayer ( disputer )
         let mut relayer = storage.batch_relayer.read();
         relayer.relayer = new_relayer;
         relayer.sk_hash = sk_hash;
-        relayer.he_pub_key = new_he_pub_key;
-        storage.batch_relayer.write(relayer);
-
-        // slash by shielding staked asset to new relayer
-        Token::at(relayer.bonding_token).shield(
-            &mut context, 
-            context.this_address(), 
-            relayer.bonding_amount,
-            secret_hash, 
-            0
-        );
-
-        // new stake deposit from new relayer
-        context.call_public_function(
-            context.this_address(),
-            FunctionSelector::from_signature("stake((Field),(Field),Field,Field)"), 
-            [new_relayer.to_field(), relayer.bonding_token.to_field(), relayer.bonding_amount, nonce],
-            GasOpts::default()
-        ).assert_empty();  
+        relayer.he_pub_key = AffinePoint::new(Point::new(new_he_pub_key_x, new_he_pub_key_y));
+        storage.batch_relayer.write(relayer); 
     }
 
     #[aztec(public)] 
-    fn stake(relayer: AztecAddress, token:AztecAddress, amount:Field, nonce:Field) {
+    #[aztec(internal)] 
+    fn _stake_bonding(relayer: AztecAddress, token:AztecAddress, amount:Field, nonce:Field) {
         let batch_relayer = storage.batch_relayer.read();
         assert(U128::from_field(amount) >= U128::from_field(batch_relayer.bonding_amount), "insufficient bonding amount");
         // TODO: also verify caller == relayer in normal situation..?
@@ -593,41 +654,48 @@ contract BatcherVault {
         );
     }
 
+    // TODO: withdraw_bonding
+    #[aztec(public)] 
+    fn withdraw_bonding(relayer: AztecAddress, token:AztecAddress, amount:Field) {
+        Token::at(token).transfer_public(
+            &mut context, 
+            context.this_address(), 
+            relayer,
+            amount,
+            0
+        );
+    }
+
+
+    #[aztec(public)]
+    fn check_sk_hash(sk_hash: Field) {
+        assert(sk_hash == storage.batch_relayer.read().sk_hash, "invalid sk_hash");
+    }
+
+
     /************************************************************************
      * Public Internal Function
      ************************************************************************/
 
-    #[aztec(public)] 
-    #[aztec(internal)]
-    fn _validate_claim_params(
-        _round: Field, 
-        _total_token_in: Field,
-        _total_token_out: Field
-    ) {
-        let round = storage.rounds.at(_round).read();
-        assert(round.token_in_amount == _total_token_in, "invalid _total_token_in");
-        assert(round.token_out_amount == _total_token_out, "invalid _total_token_in");
-    }
-
     #[aztec(public)]
     #[aztec(internal)]
     fn _add_token_out_amount(
-        C1_0_serialized: [Field;2], 
-        C2_0_serialized: [Field;2],
-        C1_1_serialized: [Field;2], 
-        C2_1_serialized: [Field;2]
+        c1_0: [Field;2], 
+        c2_0: [Field;2],
+        c1_1: [Field;2], 
+        c2_1: [Field;2]
     ) {
         let current_round = storage.current_round.read();
         let mut round = storage.rounds.at(current_round).read();
 
         let encrypted_value_to_add_0 = ElgamalAffinePoints::new(
-            AffinePoint::deserialize(C1_0_serialized),
-            AffinePoint::deserialize(C2_0_serialized)
+            AffinePoint::deserialize(c1_0),
+            AffinePoint::deserialize(c2_0)
         );
 
         let encrypted_value_to_add_1 = ElgamalAffinePoints::new(
-            AffinePoint::deserialize(C1_1_serialized),
-            AffinePoint::deserialize(C2_1_serialized)
+            AffinePoint::deserialize(c1_1),
+            AffinePoint::deserialize(c2_1)
         );
 
         let current_encrypted_sum = round.encrypted_token_out_amount;
@@ -639,28 +707,6 @@ contract BatcherVault {
 
         storage.rounds.at(current_round).write(round);
     }
-
-
-    // #[aztec(public)]
-    // #[aztec(internal)]
-    // fn _add_token_out_amount(
-    //     C1_serialized: [Field;2], 
-    //     C2_serialized: [Field;2]
-    // ) {
-    //     let current_round = storage.current_round.read();
-    //     let mut round = storage.rounds.at(current_round).read();
-
-    //     let encrypted_value_to_add = ElgamalAffinePoints::new(
-    //         AffinePoint::deserialize(C1_serialized),
-    //         AffinePoint::deserialize(C2_serialized)
-    //     );
-
-    //     let current_encrypted_sum = round.encrypted_token_out_amount;
-    //     let new_encrypted_sum = current_encrypted_sum.add(encrypted_value_to_add);
-
-    //     round.encrypted_token_out_amount = new_encrypted_sum;
-    //     storage.rounds.at(current_round).write(round);
-    // }
 
     /// "decrease" (increase) `token_out_amount_cancelled` in rounds
     #[aztec(public)]
@@ -692,6 +738,18 @@ contract BatcherVault {
 
     unconstrained fn get_token_out() -> pub Field {
         storage.token_out.read_public().to_field()
+    }
+
+    unconstrained fn get_token_in_total_amount(round: Field) -> pub Field {
+        storage.rounds.at(round).read().token_in_amount
+    }
+
+    unconstrained fn get_token_out_total_amount(round: Field) -> pub Field {
+       storage.rounds.at(round).read().token_out_amount
+    }
+
+    unconstrained fn get_token_out_amount_cancelled(round: Field) -> pub Field {
+        storage.rounds.at(round).read().token_out_amount_cancelled
     }
 
     unconstrained fn get_round() -> pub Field {
@@ -785,14 +843,3 @@ contract BatcherVault {
         to_point();
     }
 }
-
-    // let encrypted_sum = [
-    //   21472650984436762244031229619925647112984218173381824458470819684039379547949,
-    //   1837783691375768657483026041108174498631463823080692472709918501662216277768,
-    //   11690546517140707588397632225831069958620412414394622994423967885413670819429,
-    //   21302984366707003236483210776302960827497755078834244388811810345577369656375,
-    //   13058325584767053170800789778067689450276426775479771755984487613995695696571,
-    //   4975052509571564062789505510404194221861562293797938993591427913567106498933,
-    //   2873706985540263354861265913926170740549681333793565646869733174154165291296,
-    //   9501958688898625059030708999438742894669694486443633382776986148168316164379
-    // ];

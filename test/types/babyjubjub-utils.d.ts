@@ -1,6 +1,7 @@
 declare module "babyjubjub-utils" {
 	const anyExported: any;
 	export default anyExported;
+	export function privateToPublicKey(privateKey: any): Promise<any>;
 	export function generatePrivateAndPublicKey(): Promise<{
 		privateKey: any;
 		publicKey: any;

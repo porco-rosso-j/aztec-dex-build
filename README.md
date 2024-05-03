@@ -20,7 +20,7 @@ Note that the current implementation only makes input amounts invisible from the
 
 The Relayer, also called a decryptor, who owns the decryption key effectively can know all the individual deposit amounts if they look at encrypted data at each deposit tx. Furthermore, they have constant incentives to sell the decryption key to the highest bidder who is willing to pay money to monitor users' input amounts.
 
-To mitigate this risk, this batcher vault implements a stake-and-slash-based dispute mechanism that could discourage relayers from selling their decryption key as well as encourage them to keep it secure.
+To mitigate this risk, this batcher vault implements a stake-and-slash mechanism that could discourage relayers from selling their decryption key as well as encourage them to keep it secure.
 
 A relayer needs to stake a bonding token to the contract at deployment. This stake is slashed and sent to the party who proves that he knows the decryption key. For instance, if an entity disguised as a bidder successfully obtains the key, he can take the relayer's stake and optionally take over the relayer's role.
 
@@ -33,6 +33,38 @@ This could be our future improvement task and the primary reason why we decided 
 ### 2. The Upper Limit of Input Amount
 
 This batcher vault supports up to `u64` value for the plaintext (deposit amount) while the `noir-elgamal` lib only supports [up to `u40`](https://github.com/jat9292/noir-elgamal/blob/main/src/lib.nr#L81). This is made possible by splitting `u64` input value via bit shift and encrypting two separate `u32`. This limit can be increased to `u128` or more but this obviously entails more storage and execution cost and longer decryption time.
+
+In `deposit_to_batch` method:
+
+```rust
+        // split amount_out into 2 limbs
+        let lower = (amount_out as u64 & 0xFFFFFFFF) as u32; // lower
+        let upper = (amount_out as u64 >> 32) as u32; // upper
+
+        // encrypt lower
+        let (c1_0, c2_0) = noir_elgamal::exp_elgamal_encrypt(
+               relayer_he_pubkey.point,
+               lower,
+               rands[0]
+        );
+
+        // encrypt upper
+       let (c1_1, c2_1) = noir_elgamal::exp_elgamal_encrypt(
+               relayer_he_pubkey.point,
+               upper,
+               rands[1]
+        );
+
+```
+
+Stored in storage as [`EncryptedSum`](./aztec-contracts/batcher_contract/src/types/encrypted_sum.nr) struct:
+
+```rust
+     struct EncryptedSum {
+         limb0: ElgamalAffinePoints, // lower
+         limb1: ElgamalAffinePoints // upper
+     }
+```
 
 ### 3. Delay
 

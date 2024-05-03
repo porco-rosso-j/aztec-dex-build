@@ -4,6 +4,14 @@ use dep::std::collections::vec::Vec;
 use dep::std;
 use dep::std::ec;
 
+/// This implementation is a fork of the original noir_elgamal: https://github.com/jat9292/noir-elgamal
+/// This is because there needs to be a change to avoid the following error.
+///
+/// error: Use of invalid bit size 40
+/// --- Allowed bit sizes for integers are 1, 8, 32, 64
+///
+/// Hence, all u40 is changed to u32 in this file. 
+
 global bjj_a = 168700;
 global bjj_d = 168696;
 global bjj_generator_x = 995203441582195749578291179787384436505546430278305826713579947235728471134;

@@ -3,6 +3,7 @@ use crate::types::affine_point::AffinePoint;
 
 global RELAYER_SERIALIZED_LEN: Field = 9; 
 
+// relayer config struct
 struct BatchRelayer {
     relayer: AztecAddress, 
     bonding_token: AztecAddress, 

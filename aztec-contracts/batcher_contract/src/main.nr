@@ -28,7 +28,7 @@ contract BatcherVault {
 
     // types
     use crate::types::{
-        interfaces::{Token, Uniswap},
+        interfaces::Token,
         relayer::{BatchRelayer, RELAYER_SERIALIZED_LEN},
         round::{Round, ROUND_SERIALIZED_LEN},
         affine_point::{AffinePoint, AFFINE_POINT_SERIALIZED_LEN},
@@ -343,7 +343,7 @@ contract BatcherVault {
             [deposit_note.amount_out, current_round]
         ); 
 
-        // make note empty
+        // make note empty or lifecycle.destroy_note();
         let mut empty_deposit_note = DepositNote::empty();
         storage.deposit_notes.at(context.msg_sender()).replace(&mut empty_deposit_note, true);
     }
@@ -392,7 +392,7 @@ contract BatcherVault {
             0
         );
 
-        // "destroy" used deposit note
+        // "destroy" used deposit note or lifecycle.destroy_note();
         deposit_note.round = 0;
         deposit_note.amount_out = 0;
         storage.deposit_notes.at(context.msg_sender()).replace(&mut deposit_note, true);

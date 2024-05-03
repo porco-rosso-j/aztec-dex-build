@@ -1,6 +1,6 @@
 # Batcher Contract on Aztec
 
-The `BatcherVault` contract allows users to obfuscate their swap amounts when they trade on AMMs. It leverages an additive homomorphic encryption scheme to encrypt and aggregate users' input amounts without revealing individual amounts. The encrypted total amount is decrypted by a relayer who executes a batched swap. Later, users can claim their share of the output amount calculated based on their pro-rata share of the input amount in a batch.
+The `BatcherVault` contract allows users to obfuscate their swap amounts when they trade on AMMs. It leverages an additive homomorphic encryption scheme to encrypt and aggregate users' input amounts without revealing individual amounts. The encrypted total amount is decrypted by a relayer who executes a batched swap. Later, users can claim their share of the output amount calculated based on their pro-rata share of the input amount for each batch round.
 
 This vault doesn't only help conceal the users' input amount but also hide the sender address and output amount throughout the deposit and claim processes. Token transfer in both deposits and claims is performed privately without revealing `msg_sender`. The only visible information is "when" each deposit is made, as each deposit execution invokes public methods internally.
 
@@ -38,3 +38,6 @@ This batcher vault supports up to `u64` value for the plaintext (deposit amount)
 
 To offer a meaningful degree of privacy, the relayer is expected to batch several swap requests instead of one or a few. Hence, users may need to wait for a few blocks until their swap is completed. This PoC only lets the relayer execute the batch only once a minute as `interval` in `BatchRelayer` struct is set to `86400`.
 
+## Feedback
+
+plz see [here](./FEEDBACK.md)

@@ -1,6 +1,5 @@
 import {
 	Fr,
-	PXE,
 	AztecAddress,
 	AccountWalletWithPrivateKey,
 	Wallet,

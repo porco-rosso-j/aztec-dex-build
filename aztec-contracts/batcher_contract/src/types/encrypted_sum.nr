@@ -4,26 +4,13 @@ use dep::std::ec::tecurve::affine::Point;
 
 global ENCRYPTED_SUM_SERIALIZED_LEN = 8;
 
+// Type to store two separate encrypted u32 values
+// limb0 holds lower value in original u64
+// limb1 holds upper 
 struct EncryptedSum {
     limb0: ElgamalAffinePoints,
     limb1: ElgamalAffinePoints
 }
-
-// impl EncryptedSum {
-//     fn get_encrypted_amount(self) -> [Field;8] {
-//         let enc_sum = self.serialize();
-//         [
-//             enc_sum[0],
-//             enc_sum[1],
-//             enc_sum[2],
-//             enc_sum[3],
-//             enc_sum[4],
-//             enc_sum[5],
-//             enc_sum[6],
-//             enc_sum[7],
-//         ]
-//     }
-// }
 
 impl Deserialize<ENCRYPTED_SUM_SERIALIZED_LEN> for EncryptedSum {
     fn deserialize(fields: [Field; ENCRYPTED_SUM_SERIALIZED_LEN]) -> Self {

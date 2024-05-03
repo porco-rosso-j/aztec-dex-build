@@ -1,3 +1,4 @@
+import { jest, beforeAll, it, describe, expect } from "@jest/globals";
 import {
 	Fr,
 	PXE,
@@ -8,11 +9,11 @@ import {
 	generatePublicKey,
 	computeMessageSecretHash,
 } from "@aztec/aztec.js";
-import { jest, beforeAll, it, describe, expect } from "@jest/globals";
+import { computePartialAddress } from "@aztec/circuits.js";
 import { getInitialTestAccountsWallets } from "@aztec/accounts/testing";
+import { TokenContract } from "@aztec/noir-contracts.js";
 import { BatcherVaultContract } from "./artifacts/BatcherVault.js";
 import { AMMMockContract } from "./artifacts/AMMMock.js";
-import { TokenContract } from "@aztec/noir-contracts.js";
 import {
 	deployAMMMock,
 	deployTokensAndMint,
@@ -29,9 +30,8 @@ import {
 	SK_HASH,
 	SLASH_AMOUNT,
 } from "./utils/constants.js";
-import { computePartialAddress } from "@aztec/circuits.js";
-import * as bjj from "babyjubjub-utils";
 import { addPendingShieldNoteToPXE } from "./utils/addNote.js";
+import * as bjj from "babyjubjub-utils";
 
 let pxe: PXE;
 let batcher: BatcherVaultContract;
@@ -230,7 +230,6 @@ describe("E2E Batcher setup", () => {
 		const rands = [Fr.random(), Fr.random()];
 		const nonce = Fr.random();
 		const currennt_round = await batcher.methods.get_round().simulate();
-		// const deposit_amount = BigInt(1e18);
 		const deposit_amount = BigInt(1e15);
 
 		const action = dai
@@ -344,17 +343,6 @@ describe("E2E Batcher setup", () => {
 			.simulate();
 
 		console.log("amm_token_in_before: ", amm_token_in_before);
-
-		const nonceForDAIApproval = new Fr(1n);
-		await admin_relayer.createAuthWit({
-			caller: amm.address,
-			action: dai.methods.unshield(
-				batcher.address,
-				amm.address,
-				5e16,
-				nonceForDAIApproval
-			),
-		});
 
 		const tx = await batcher.methods
 			.execute_batch(

@@ -54,7 +54,11 @@ e.g. this causes a runtime error!　(A lack of one right-most bracket)
 let selector = FunctionSelector::from_signature("func((Field),(Field),(Field)")
 ```
 
-### 3. Need to `deployWithPublicKey` manually (aztec.js)
+### 3. `pow_32()` fails with large exponent at runtime (noir)
+
+`pow_32()` function for Field fails at runtime, throwing an error `Cannot satisfy constraint 'self.__to_le_bits(bit_size)` even though it computes the correct value in the test.
+
+### 4. Need to `deployWithPublicKey` manually (aztec.js)
 
 Since the batcher vault contract needs to receive token from external contracts including accounts via `transfer()`, I had to register the contract by changing the deployment line from ordinal one to the one `deployWithPublicKey()`.
 
@@ -86,6 +90,6 @@ const batcherInstance = batcherContractDeployment.getInstance();
 await pxe.registerAccount(privateKey, computePartialAddress(batcherInstance));
 ```
 
-### 4. `publicDeployAccounts` by default (aztec.js)
+### 5. `publicDeployAccounts` by default (aztec.js)
 
 As I see other developers face this, and I also had to manually add this func [here](./test/utils/deploy.ts) it'd be nice if this registration is done by default.

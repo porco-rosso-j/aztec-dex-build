@@ -417,7 +417,7 @@ contract BatcherVault {
      ************************************************************************/
 
     // This method lets relayer execute a batch for a certain round.
-    // 1: decrypts splitted encrypted deposit amounts and combine them
+    // 1: decrypts split encrypted deposit amounts and combine them
     // 2: approves the AMM contract for unshielding funds from this contract
     // 3: calls swap function on AMM contract
     #[aztec(private)]
@@ -519,16 +519,9 @@ contract BatcherVault {
             context.version(),
             inner_hash
         );
-        
-        // get boolean value for an action stored in note
+
         let auth_action = storage.auth_actions.at(message_hash).get_note(false);
-        
-        if (auth_action.approved) {
-            context.push_new_nullifier(message_hash, 0);
-            IS_VALID_SELECTOR
-        } else {
-            0
-        }
+        auth_action.validate_action(&mut context, message_hash)
     }
 
     // called by `execute_batch()`
@@ -553,7 +546,7 @@ contract BatcherVault {
         let _amount_out_sub_cancelled = amount_out - round.token_out_amount_cancelled;
         assert(amount_out_sub_cancelled == _amount_out_sub_cancelled, "invalid_cancelled_amount_out");
 
-        // TODO: validate swap amount or decrypted data against encyrpted ammounts
+        // TODO: validate swap amount or decrypted data against encyrpted amounts
 
         // store data for the round
         round.expected_min_token_in = expected_token_in;
@@ -599,6 +592,8 @@ contract BatcherVault {
 
         // increment round count
         storage.current_round.write(current_round + 1);
+
+        // TODO: intiialize next Round with zero values for encrypted_token_out_amount
     }
 
     /************************************************************************

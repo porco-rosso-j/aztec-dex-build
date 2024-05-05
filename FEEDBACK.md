@@ -58,7 +58,15 @@ let selector = FunctionSelector::from_signature("func((Field),(Field),(Field)")
 
 `pow_32()` function for Field fails at runtime, throwing an error `Cannot satisfy constraint 'self.__to_le_bits(bit_size)` even though it computes the correct value in the test.
 
-### 4. Need to `deployWithPublicKey` manually (aztec.js)
+### 4. Print `BigInt` for debugging
+As mentioned in [this question](https://discord.com/channels/1113924620781883405/1230934946571620414) of Noir discord, it'd be great if i could print Bn254Fr/BigInt value directly w/o converting it back to Field. 
+
+If i println BigInt value directly, it only shows the info below:
+```shell
+BigInt { inner: BigInt { pointer: 0, modulus: 0 } }
+```
+
+### 5. Need to `deployWithPublicKey` manually (aztec.js)
 
 Since the batcher vault contract needs to receive token from external contracts including accounts via `transfer()`, I had to register the contract by changing the deployment line from ordinal one to the one `deployWithPublicKey()`.
 
@@ -90,6 +98,6 @@ const batcherInstance = batcherContractDeployment.getInstance();
 await pxe.registerAccount(privateKey, computePartialAddress(batcherInstance));
 ```
 
-### 5. `publicDeployAccounts` by default (aztec.js)
+### 6. `publicDeployAccounts` by default (aztec.js)
 
 As I see other developers face this, and I also had to manually add this func [here](./test/utils/deploy.ts) it'd be nice if this registration is done by default.

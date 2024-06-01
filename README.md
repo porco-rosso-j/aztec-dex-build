@@ -69,7 +69,3 @@ Stored in storage as [`EncryptedSum`](./aztec-contracts/batcher_contract/src/typ
 ### 3. Delay
 
 To offer a meaningful degree of privacy, the relayer is expected to batch several swap requests instead of one or a few. Hence, users may need to wait for a few blocks until their swap is completed. This PoC only lets the relayer execute the batch only once a minute as `interval` in `BatchRelayer` struct is set to `86400`.
-
-## Feedback
-
-plz see [here](./FEEDBACK.md)
